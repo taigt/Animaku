@@ -71,6 +71,7 @@
 - 视频源、弹幕与 Bangumi 全链路健康度与分片连通性测试工具：`scripts/test-sources.ts`（`pnpm test:sources`，支持全量探活、单源排查、64KB视频分片探测、GeoIP地域自适应与大模型排障诊断）
 - 视频源全链路性能与老番资源覆盖度横评工具：`scripts/benchmark-sources.mjs`
 - 视频源自动化探查与指纹识别工具：`scripts/probe-source.mjs`
+- App 客户端直连播放与 Headers 协议接入手册 (大模型专用)：`docs/app-integration-guide.md`
 
 ## 6. 播放会话与页面布局 (Watch Page & Session)
 - 播放页主控制器：`apps/web/src/pages/WatchPage.tsx`

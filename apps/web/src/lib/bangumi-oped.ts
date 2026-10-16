@@ -135,7 +135,9 @@ export async function fetchBangumiOpedDetail(
 ): Promise<BgmOpedRemoteDetail> {
   const url = `${BANGUMI_OPED_BASE}/${subjectId}/${subjectId}.txt`
   try {
-    const res = await fetch(url, { signal })
+    // 使用 cache: 'no-cache' 强制向 CDN 发起 ETag 条件请求 (304 协商)，
+    // 规避 jsDelivr 默认响应头 max-age=604800 导致的浏览器端 7 天强缓存更新滞后
+    const res = await fetch(url, { signal, cache: 'no-cache' })
     if (res.status === 404) {
       return { exists: false, data: new Map(), rawText: '' }
     }

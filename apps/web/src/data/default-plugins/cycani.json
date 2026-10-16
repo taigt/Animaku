@@ -5,6 +5,7 @@
   "version": "1.0",
   "weight": 61,
   "titlePreference": "chinese",
+  "oldAnimePriority": true,
   "muliSources": true,
   "useWebview": false,
   "useNativePlayer": true,

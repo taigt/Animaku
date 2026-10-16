@@ -42,7 +42,8 @@ migrateLocalStorageKey('animaku-plugins', [
 /** v36: remove girigiri oldAnimePriority; moonci titlePreference chinese */
 /** v37: tune weights (xifan-next: 66, moonci: 65, cycani/mifun: 61, girigiri: 60, tvtfun: 51) */
 /** v38: tune girigiri weight to 55, fix mxdm relative xpath, omofun rank & unescape, xifan-next source_id */
-export const PLUGIN_DEFAULTS_VERSION = 38
+/** v39: tune girigiri weight to 59 (same as lzizy) & restore cycani oldAnimePriority */
+export const PLUGIN_DEFAULTS_VERSION = 39
 
 interface PluginState {
   plugins: PluginMeta[]

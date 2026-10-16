@@ -666,9 +666,9 @@ test('wrapResolveWithTicket: preserves adFilter=1 on proxyUrl and redacts sensit
   assert.ok(res2.proxyUrl.includes('/api/media/segment?t='))
   assert.equal(res2.proxyUrl.includes('adFilter=1'), false)
 
-  // 3. Cookie redaction: headers containing Cookie should be stripped in returned result
+  // 3. Cookie redaction: headers containing Cookie should be stripped in returned result for Web/proxy sources
   const ruleWithCookie = {
-    name: 'anime1',
+    name: 'anime1-web',
   }
   const res3 = wrapResolveWithTicket(ruleWithCookie as any, {
     playUrl: 'https://v.anime1.me/1.mp4',
@@ -685,6 +685,28 @@ test('wrapResolveWithTicket: preserves adFilter=1 on proxyUrl and redacts sensit
   assert.equal(res3.headers['User-Agent'], 'Mozilla/5.0')
   assert.equal(res3.headers.Referer, 'https://anime1.me/')
   assert.equal('Cookie' in res3.headers, false)
+
+  // 4. App Direct source (platforms: ['app'], requiresFullMediaProxy: false): preserves Cookie & requiresProxy: false
+  const ruleAppDirect = {
+    name: 'anime1',
+    platforms: ['app'],
+    requiresFullMediaProxy: false,
+  }
+  const res4 = wrapResolveWithTicket(ruleAppDirect as any, {
+    playUrl: 'https://v.anime1.me/1.mp4',
+    proxyUrl: '/api/media/proxy?url=https%3A%2F%2Fv.anime1.me%2F1.mp4',
+    format: 'mp4',
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      Referer: 'https://anime1.me/',
+      Cookie: 'e=1728000000; path=/',
+    },
+  })
+  assert.equal(res4.requiresProxy, false)
+  assert.equal(res4.playUrl, 'https://v.anime1.me/1.mp4')
+  assert.ok(res4.headers)
+  assert.equal(res4.headers.Cookie, 'e=1728000000; path=/')
+  assert.equal(res4.headers.Referer, 'https://anime1.me/')
 })
 
 

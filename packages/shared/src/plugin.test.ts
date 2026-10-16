@@ -245,3 +245,21 @@ test('resolveTargetSourcePlugin: 历史播放深链指定的源不存在时安�
   const target = resolveTargetSourcePlugin('non_existent_plugin', mockPlugins, [])
   assert.equal(target?.name, 'xifan-next')
 })
+
+test('parsePluginRule: platforms 字段正确解析与非法值过滤', () => {
+  const ruleAppOnly = parsePluginRule({
+    name: 'test-app',
+    baseURL: 'https://example.com',
+    searchURL: 'https://example.com/s',
+    platforms: ['app', 'invalid_platform'],
+  })
+  assert.deepEqual(ruleAppOnly.platforms, ['app'])
+
+  const ruleDefault = parsePluginRule({
+    name: 'test-web',
+    baseURL: 'https://example.com',
+    searchURL: 'https://example.com/s',
+  })
+  assert.equal(ruleDefault.platforms, undefined)
+})
+

@@ -8,8 +8,10 @@ import type { SourceAdapter, RawResolveResult } from '../source-types'
 
 const ANIME1_RULE: PluginRule = {
   name: 'anime1',
-  version: '1.0.0',
+  version: '1.1.0',
   baseURL: 'https://anime1.me',
+  platforms: ['app'],
+  requiresFullMediaProxy: false,
 }
 
 export const anime1Adapter: SourceAdapter = {

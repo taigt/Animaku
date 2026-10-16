@@ -848,6 +848,22 @@ export async function searchWithRule(
     }
   }
 
+  // sorani.net — dedicated adapter (RESTful JSON API + App Direct Stream)
+  {
+    const { isSoraniRule, searchSorani } = await import('../lib/sorani')
+    if (isSoraniRule(rule)) {
+      try {
+        return await searchSorani(rule, keyword)
+      } catch (e) {
+        return {
+          pluginName: rule.name,
+          items: [],
+          diagnostics: [e instanceof Error ? e.message : String(e)],
+        }
+      }
+    }
+  }
+
   // Anime1.me — dedicated adapter (s2t search + category grouping)
   {
     const { isAnime1Rule, searchAnime1 } = await import('../lib/anime1')
@@ -1197,6 +1213,22 @@ export async function chaptersWithRule(
     if (isCycaniRule(rule)) {
       try {
         return await chaptersCycani(rule, source)
+      } catch (e) {
+        return {
+          pluginName: rule.name,
+          roads: [],
+          diagnostics: [e instanceof Error ? e.message : String(e)],
+        }
+      }
+    }
+  }
+
+  // sorani.net — dedicated adapter (RESTful JSON API)
+  {
+    const { isSoraniRule, chaptersSorani } = await import('../lib/sorani')
+    if (isSoraniRule(rule)) {
+      try {
+        return await chaptersSorani(rule, source)
       } catch (e) {
         return {
           pluginName: rule.name,
@@ -1733,10 +1765,23 @@ export function wrapResolveWithTicket(
       result.playUrl.toLowerCase().includes('cycstream.com')
     const format: 'hls' | 'mp4' = result.format || (isMp4 ? 'mp4' : 'hls')
     const cookie = result.headers?.Cookie || result.headers?.cookie
+
+    // 判断是否为 App 原生端直连模式：
+    // 1. 若规则明确标注为纯 App 原生端消费（platforms 包含 'app' 且不包含 'web'）；
+    // 2. 或规则显式声明 requiresFullMediaProxy === false。
+    // 此时即使带有鉴权 Cookie，也不强制媒体流走服务端全代理（节省服务端宝贵带宽），
+    // 而是允许将源站真实 playUrl 与直连所需的完整 headers（含动态 Cookie / Referer）透传给 App 原生播放器。
+    const isAppDirect =
+      (Array.isArray(rule.platforms) &&
+        rule.platforms.includes('app') &&
+        !rule.platforms.includes('web')) ||
+      rule.requiresFullMediaProxy === false
+
     const requiresProxy =
-      Boolean(cookie) ||
-      Boolean(rule.requiresFullMediaProxy) ||
-      result.requiresProxy === true
+      !isAppDirect &&
+      (Boolean(cookie) ||
+        Boolean(rule.requiresFullMediaProxy) ||
+        result.requiresProxy === true)
     const asset = playbackRegistry.registerAsset({
       source: rule.name || 'custom',
       baseUrl: result.playUrl,
@@ -1761,9 +1806,11 @@ export function wrapResolveWithTicket(
         ))
     const adFilterQuery = shouldFilterAds ? '&adFilter=1' : ''
 
-    // 凭据隔离脱敏：受控代拉凭据（Cookie/Authorization）已安全加密入库，对外下发的 headers 剔除敏感凭据头
+    // 凭据隔离脱敏：受控代拉凭据（Cookie/Authorization）仅在走服务端媒体全代理（requiresProxy 为 true）时剥离脱敏；
+    // 若为 App 直连场景（requiresProxy 为 false），必须完整保留直连鉴权头（含动态 Cookie / Referer / UA），
+    // 确保 App 原生播放器直连请求时不被源站 403 阻断。
     let safeHeaders = result.headers
-    if (safeHeaders && (cookie || requiresProxy)) {
+    if (safeHeaders && requiresProxy) {
       const {
         Cookie: _c1,
         cookie: _c2,
@@ -1807,6 +1854,14 @@ export async function resolvePlay(
     const { isCycaniRule, resolveCycani } = await import('../lib/cycani')
     if (isCycaniRule(rule)) {
       return wrapResolveWithTicket(rule, await resolveCycani(rule, pageUrl))
+    }
+  }
+
+  // sorani: dedicated adapter (RESTful JSON API + Referer-protected 1080P HLS)
+  {
+    const { isSoraniRule, resolveSorani } = await import('../lib/sorani')
+    if (isSoraniRule(rule)) {
+      return wrapResolveWithTicket(rule, await resolveSorani(rule, pageUrl))
     }
   }
 

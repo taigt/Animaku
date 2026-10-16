@@ -128,6 +128,12 @@ export interface PluginRule {
    * When true, strip special punctuation and symbols before sending search requests.
    */
   stripSymbols?: boolean
+  /**
+   * Supported client platforms.
+   * When omitted or empty, defaults to ['web', 'app'] (available to all clients).
+   * Set to ['app'] for sources exclusive to native apps (hidden from web UI).
+   */
+  platforms?: ('web' | 'app')[]
   muliSources?: boolean
   useWebview?: boolean
   useNativePlayer?: boolean
@@ -753,6 +759,11 @@ export function parsePluginRule(raw: unknown): PluginRule {
       ? j.stripSymbols
       : undefined
 
+  const rawPlatforms = Array.isArray(j.platforms)
+    ? (j.platforms.filter((p: unknown) => p === 'web' || p === 'app') as ('web' | 'app')[])
+    : undefined
+  const platforms = rawPlatforms && rawPlatforms.length > 0 ? rawPlatforms : undefined
+
   // If this is an AniBaka anx-rule/2 pipeline rule, parse its pipeline fields
   if (isAnxRule(j)) {
     const parseSteps = (val: unknown): PipelineStep[] | undefined => {
@@ -797,6 +808,7 @@ export function parsePluginRule(raw: unknown): PluginRule {
       titlePreference,
       traditionalChinese,
       stripSymbols,
+      platforms,
       muliSources: true,
       useNativePlayer: true,
       usePost: false,
@@ -867,6 +879,7 @@ export function parsePluginRule(raw: unknown): PluginRule {
     titlePreference,
     traditionalChinese,
     stripSymbols,
+    platforms,
     muliSources: Boolean(j.muliSources ?? true),
     useWebview: Boolean(j.useWebview ?? true),
     useNativePlayer: Boolean(j.useNativePlayer ?? true),

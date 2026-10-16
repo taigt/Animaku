@@ -15,6 +15,7 @@ import { moonciAdapter } from './adapters/moonci'
 import { tvtfunAdapter } from './adapters/tvtfun'
 import { anime1Adapter } from './adapters/anime1'
 import { animoeAdapter } from './adapters/animoe'
+import { soraniAdapter } from './adapters/sorani'
 
 export interface SourceRegistryOptions {
   playback?: PlaybackRegistry
@@ -44,6 +45,7 @@ export class SourceRegistry {
       tvtfunAdapter,
       anime1Adapter,
       animoeAdapter,
+      soraniAdapter,
     ]
 
     for (const adapter of initialAdapters) {
@@ -106,6 +108,15 @@ export class SourceRegistry {
       normalized === 'animoe.org'
     ) {
       return this.adapters.get('animoe') || null
+    }
+    if (
+      normalized === 'sorani' ||
+      normalized === 'sorani_net' ||
+      normalized === 'soraninet' ||
+      normalized === '青空' ||
+      normalized === '青空次元'
+    ) {
+      return this.adapters.get('sorani') || null
     }
     return null
   }
@@ -286,7 +297,7 @@ export class SourceRegistry {
 
     const endpoint = isMp4 ? '/api/media/segment' : '/api/media/stream'
 
-    // 6. 返回纯受控 DTO
+    // 6. 返回受控 DTO（附带原始直链与请求头以支持 App 原生播放器直连）
     return {
       source: sourceId,
       streamUrl: `${endpoint}?t=${encodeURIComponent(ticket)}`,
@@ -294,6 +305,8 @@ export class SourceRegistry {
       format,
       expiresAt: asset.expiresAt,
       requiresProxy: Boolean(raw.credentials),
+      playUrl: raw.mediaUrl,
+      headers: raw.publicHeaders,
     }
   }
 }

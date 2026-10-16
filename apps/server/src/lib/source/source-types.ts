@@ -72,6 +72,10 @@ export interface SourceResolveOutput {
   expiresAt: number
   /** 是否需要服务端强制代理流传输（如 Cookie 鉴权源） */
   requiresProxy?: boolean
+  /** 源站原始播放直链 (供 App 原生播放器直连) */
+  playUrl?: string
+  /** 直连所需的请求头 (含 Cookie, Referer 等) */
+  headers?: Record<string, string>
 }
 
 /**

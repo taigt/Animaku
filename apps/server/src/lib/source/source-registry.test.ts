@@ -7,37 +7,41 @@ import { kvCache } from '../../db/repositories/kv-cache'
 import type { SourceAdapter } from './source-types'
 import { sourceRoutes } from '../../routes/source'
 
-test('source-registry: lists built-in 6 tier adapters and handles alias normalization', () => {
+test('source-registry: lists built-in tier adapters and handles alias normalization', () => {
   const registry = new SourceRegistry()
   const list = registry.listSources()
 
   assert.equal(list.length >= 6, true)
   const ids = list.map((s) => s.id)
   assert.ok(ids.includes('xifan-next'))
-  assert.ok(ids.includes('xifan'))
+  // 废弃的 legacy xifan 必须不再出现在固化源列表中
+  assert.equal(ids.includes('xifan'), false)
   assert.ok(ids.includes('cycani'))
   assert.ok(ids.includes('moonci'))
   assert.ok(ids.includes('tvtfun'))
   assert.ok(ids.includes('anime1'))
   assert.ok(ids.includes('animoe'))
+  assert.ok(ids.includes('sorani'))
 
-  // 独立源独立存在
+  // 正常现代源
   const xifanNext = registry.getAdapter('xifan-next')
   assert.equal(xifanNext?.id, 'xifan-next')
   assert.equal(xifanNext?.name, '稀饭Next')
 
-  const xifan = registry.getAdapter('xifan')
-  assert.equal(xifan?.id, 'xifan')
-  assert.equal(xifan?.name, '稀饭动漫')
+  // 废弃的 legacy xifan 及其别名平滑归一重定向至 xifan-next
+  const legacyXifan = registry.getAdapter('xifan')
+  assert.equal(legacyXifan?.id, 'xifan-next')
+  assert.equal(registry.getAdapter('稀饭动漫')?.id, 'xifan-next')
+  assert.equal(registry.getAdapter('稀饭')?.id, 'xifan-next')
 
   // 别名归一化查找
   assert.equal(registry.getAdapter('稀饭Next')?.id, 'xifan-next')
   assert.equal(registry.getAdapter('xifan_next')?.id, 'xifan-next')
-  assert.equal(registry.getAdapter('稀饭动漫')?.id, 'xifan')
   assert.equal(registry.getAdapter('次元城')?.id, 'cycani')
   assert.equal(registry.getAdapter('月之祠')?.id, 'moonci')
   assert.equal(registry.getAdapter('anime1.me')?.id, 'anime1')
   assert.equal(registry.getAdapter('animoe动漫')?.id, 'animoe')
+  assert.equal(registry.getAdapter('青空')?.id, 'sorani')
 })
 
 test('source-registry: validateEgress enforces protocol, standard web ports, and public host boundary', () => {
@@ -67,7 +71,7 @@ test('source-registry: validateEgress enforces protocol, standard web ports, and
   // 4. 非法协议拦截 (ftp:, file:, gopher:)
   const badScheme = registry.validateEgress(
     'ftp://next.xifanacg.com/file',
-    'xifan',
+    'xifan-next',
   )
   assert.equal(badScheme.valid, false)
   assert.match(badScheme.reason || '', /disallowed protocol/i)
@@ -76,7 +80,7 @@ test('source-registry: validateEgress enforces protocol, standard web ports, and
   // 默认情况下合法公网非标端口 (如 9000) 正常放行，避免合法源误杀
   const customPortOk = registry.validateEgress(
     'https://next.xifanacg.com:9000/data',
-    'xifan',
+    'xifan-next',
   )
   assert.equal(customPortOk.valid, true)
 
@@ -86,7 +90,7 @@ test('source-registry: validateEgress enforces protocol, standard web ports, and
     process.env.MEDIA_ALLOWED_PORTS = '80,443,8080,8443'
     const badPort = registry.validateEgress(
       'https://next.xifanacg.com:6379/data',
-      'xifan',
+      'xifan-next',
     )
     assert.equal(badPort.valid, false)
     assert.match(badPort.reason || '', /port 6379 not permitted/i)
@@ -97,7 +101,7 @@ test('source-registry: validateEgress enforces protocol, standard web ports, and
   // 6. 私有 IP / 回环 SSRF 物理层严格拦截
   const loopback = registry.validateEgress(
     'http://127.0.0.1:8787/admin',
-    'xifan',
+    'xifan-next',
   )
   assert.equal(loopback.valid, false)
 

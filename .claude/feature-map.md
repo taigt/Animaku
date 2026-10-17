@@ -45,7 +45,7 @@
 
 ## 5. 视频源体系、规则引擎与适配器 (Video Sources & Custom Adapters)
 - 受控视频源注册表与网络能力校验 (SourceRegistry & Egress Policy)：`apps/server/src/lib/source/source-registry.ts`, `apps/server/src/lib/source/source-types.ts`
-- 固化适配器实现：`apps/server/src/lib/source/adapters/` (xifan, cycani, moonci, tvtfun, anime1)
+- 固化适配器实现：`apps/server/src/lib/source/adapters/` (xifan-next, cycani, moonci, tvtfun, anime1, animoe, sorani)
 - 视频源受控 HTTP 端点 (/api/source/*)：`apps/server/src/routes/source.ts`
 - 视频源规则引擎调度：`apps/server/src/rule-engine/index.ts`, `apps/server/src/rule-engine/api.ts`
 - 专有适配器：

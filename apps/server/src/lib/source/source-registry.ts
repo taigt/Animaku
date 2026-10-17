@@ -9,7 +9,6 @@ import type {
   SourceMetadata,
 } from './source-types'
 import { xifanNextAdapter } from './adapters/xifan-next'
-import { xifanAdapter } from './adapters/xifan'
 import { cycaniAdapter } from './adapters/cycani'
 import { moonciAdapter } from './adapters/moonci'
 import { tvtfunAdapter } from './adapters/tvtfun'
@@ -39,7 +38,6 @@ export class SourceRegistry {
 
     const initialAdapters = options.adapters || [
       xifanNextAdapter,
-      xifanAdapter,
       cycaniAdapter,
       moonciAdapter,
       tvtfunAdapter,
@@ -71,20 +69,17 @@ export class SourceRegistry {
     if (direct) return direct
 
     // 别名标准化匹配
+    // 特殊兼容处理：已废弃的 legacy xifan 及其别名平滑归一重定向至 xifan-next，规避老版本 App 客户端本地选源缓存报错 400
     if (
       normalized === 'xifan-next' ||
       normalized === 'xifan_next' ||
       normalized === 'xifannext' ||
-      normalized === '稀饭next'
-    ) {
-      return this.adapters.get('xifan-next') || null
-    }
-    if (
+      normalized === '稀饭next' ||
       normalized === 'xifan' ||
       normalized === '稀饭动漫' ||
       normalized === '稀饭'
     ) {
-      return this.adapters.get('xifan') || null
+      return this.adapters.get('xifan-next') || null
     }
     if (
       normalized === 'cycani' ||

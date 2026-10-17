@@ -3,7 +3,7 @@
   "type": "anime",
   "name": "girigiri",
   "version": "1.1",
-  "weight": 59,
+  "weight": 60,
   "titlePreference": "chinese",
   "muliSources": true,
   "useWebview": false,

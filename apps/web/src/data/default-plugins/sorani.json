@@ -3,7 +3,7 @@
   "type": "anime",
   "name": "sorani",
   "version": "1.0",
-  "weight": 65,
+  "weight": 60,
   "platforms": ["app"],
   "titlePreference": "chinese",
   "muliSources": false,

@@ -18,7 +18,8 @@ import {
 } from '../lib/bangumi-image-host'
 import { useSettingsStore } from '../stores/settings'
 import { isBuiltinPlugin, usePluginStore } from '../stores/plugins'
-import { useSiteConfigStore } from '../stores/site-config'
+import { useSiteConfigStore, type AnnouncementItem } from '../stores/site-config'
+import { SiteAnnouncementModal } from '../components/SiteAnnouncementModal'
 import { IconCropModal } from '../components/IconCropModal'
 import { PageHeader } from '../components/ui'
 import { getSiteBranding } from '../lib/site-branding'
@@ -1400,6 +1401,41 @@ function AdminPanelSection({
   const resetAllConfig = useSiteConfigStore((s) => s.resetAllConfig)
   const triggerIndexNow = useSiteConfigStore((s) => s.triggerIndexNow)
 
+  // 公告管理
+  const announcementEnabled = useSiteConfigStore((s) => s.announcementEnabled)
+  const announcement = useSiteConfigStore((s) => s.announcement)
+  const announcementHistory = useSiteConfigStore((s) => s.announcementHistory)
+  const saveAnnouncement = useSiteConfigStore((s) => s.saveAnnouncement)
+  const uploadAnnouncementImage = useSiteConfigStore((s) => s.uploadAnnouncementImage)
+  const fetchAnnouncementHistory = useSiteConfigStore((s) => s.fetchAnnouncementHistory)
+  const deleteAnnouncementHistory = useSiteConfigStore((s) => s.deleteAnnouncementHistory)
+
+  const [annEnabledInput, setAnnEnabledInput] = useState(announcementEnabled)
+  const [annTitleInput, setAnnTitleInput] = useState(announcement?.title || '')
+  const [annContentInput, setAnnContentInput] = useState(announcement?.content || '')
+  const [annImageUrlInput, setAnnImageUrlInput] = useState(announcement?.imageUrl || '')
+  const [annImageLinkInput, setAnnImageLinkInput] = useState(announcement?.imageLink || '')
+  const [annSizeInput, setAnnSizeInput] = useState<'compact' | 'standard' | 'large'>(
+    announcement?.size || 'standard',
+  )
+  const [annHeightInput, setAnnHeightInput] = useState<number>(announcement?.imageHeight || 0)
+  const [annWidthInput, setAnnWidthInput] = useState<number>(
+    typeof announcement?.imageWidth === 'number' ? announcement.imageWidth : 100,
+  )
+  const [annOffsetXInput, setAnnOffsetXInput] = useState<number>(
+    typeof announcement?.imageOffsetX === 'number' ? announcement.imageOffsetX : 50,
+  )
+  const [annOffsetYInput, setAnnOffsetYInput] = useState<number>(
+    typeof announcement?.imageOffsetY === 'number' ? announcement.imageOffsetY : 50,
+  )
+  const [annZoomInput, setAnnZoomInput] = useState<number>(
+    typeof announcement?.imageZoom === 'number' ? announcement.imageZoom : 1,
+  )
+  const [annSaving, setAnnSaving] = useState(false)
+  const [annUploading, setAnnUploading] = useState(false)
+  const [annMsg, setAnnMsg] = useState('')
+  const [previewAnnouncement, setPreviewAnnouncement] = useState<AnnouncementItem | null>(null)
+
   // 认证输入
   const [secretInput, setSecretInput] = useState('')
   const [showSecret, setShowSecret] = useState(false)
@@ -1574,6 +1610,92 @@ function AdminPanelSection({
     } finally {
       setIsIndexing(false)
     }
+  }
+
+  useEffect(() => {
+    if (isAdminUnlocked) {
+      void fetchAnnouncementHistory()
+    }
+  }, [isAdminUnlocked, fetchAnnouncementHistory])
+
+  useEffect(() => {
+    setAnnEnabledInput(announcementEnabled)
+    setAnnTitleInput(announcement?.title || '')
+    setAnnContentInput(announcement?.content || '')
+    setAnnImageUrlInput(announcement?.imageUrl || '')
+    setAnnImageLinkInput(announcement?.imageLink || '')
+    setAnnSizeInput(announcement?.size || 'standard')
+    setAnnHeightInput(announcement?.imageHeight || 0)
+    setAnnWidthInput(typeof announcement?.imageWidth === 'number' ? announcement.imageWidth : 100)
+    setAnnOffsetXInput(typeof announcement?.imageOffsetX === 'number' ? announcement.imageOffsetX : 50)
+    setAnnOffsetYInput(typeof announcement?.imageOffsetY === 'number' ? announcement.imageOffsetY : 50)
+    setAnnZoomInput(typeof announcement?.imageZoom === 'number' ? announcement.imageZoom : 1)
+  }, [announcementEnabled, announcement])
+
+  const handleAnnouncementImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      setAnnMsg('❌ 图片大小不能超过 5MB')
+      return
+    }
+    setAnnUploading(true)
+    setAnnMsg('正在上传图片…')
+    try {
+      const res = await uploadAnnouncementImage(file)
+      if (res.ok && res.imageUrl) {
+        setAnnImageUrlInput(res.imageUrl)
+        setAnnMsg('✅ 配图上传成功，可直接在下方自定义调整展示区域')
+      } else {
+        setAnnMsg(`❌ 上传失败: ${res.message || '未知错误'}`)
+      }
+    } catch (err) {
+      setAnnMsg(`❌ 上传异常: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setAnnUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleSaveAnnouncement = async () => {
+    const hasContent = Boolean(
+      annTitleInput.trim() || annContentInput.trim() || annImageUrlInput.trim(),
+    )
+    if (annEnabledInput && !hasContent) {
+      setAnnMsg('❌ 开启公告时，标题、正文或图片至少需要填写一项')
+      return
+    }
+    setAnnSaving(true)
+    setAnnMsg('')
+    try {
+      const res = await saveAnnouncement({
+        enabled: annEnabledInput,
+        title: annTitleInput,
+        content: annContentInput,
+        imageUrl: annImageUrlInput,
+        imageLink: annImageLinkInput,
+        size: annSizeInput,
+        imageHeight: annHeightInput,
+        imageWidth: annWidthInput,
+        imageOffsetX: annOffsetXInput,
+        imageOffsetY: annOffsetYInput,
+        imageZoom: annZoomInput,
+      })
+      if (res.ok) {
+        setAnnMsg('✅ 公告已保存并即时生效')
+      } else {
+        setAnnMsg(`❌ 保存失败: ${res.message || '未知错误'}`)
+      }
+    } catch (err) {
+      setAnnMsg(`❌ 保存异常: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setAnnSaving(false)
+    }
+  }
+
+  const handleDeleteHistory = async (id: string) => {
+    if (!confirm('确定要删除此条历史公告记录吗？')) return
+    await deleteAnnouncementHistory(id)
   }
 
   const currentIconDisplay =
@@ -1810,6 +1932,493 @@ function AdminPanelSection({
               </div>
             </div>
 
+            {/* 站点公告管理 */}
+            <div className="space-y-3 pt-3 border-t border-[var(--kz-border)]/40">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold text-[var(--kz-fg)] flex items-center gap-1.5">
+                  <span>📢</span> 站点公告
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <span className="text-xs text-[var(--kz-fg-muted)]">
+                    {annEnabledInput ? '已开启' : '已关闭'}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={annEnabledInput}
+                    onChange={(e) => setAnnEnabledInput(e.target.checked)}
+                    className="rounded text-[var(--kz-accent)] focus:ring-0 cursor-pointer"
+                  />
+                </label>
+              </div>
+
+              <div className="space-y-3">
+                {/* 标题 */}
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[var(--kz-fg-dim)]">公告标题</label>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    placeholder="可选：输入公告标题"
+                    maxLength={100}
+                    value={annTitleInput}
+                    onChange={(e) => setAnnTitleInput(e.target.value)}
+                    className="w-full rounded-xl border border-[var(--kz-border)] bg-[var(--kz-bg-soft)] px-3 py-2 text-xs text-[var(--kz-fg)] placeholder-[var(--kz-fg-dim)] outline-none focus:border-[var(--kz-accent)]"
+                  />
+                </div>
+
+                {/* 正文 */}
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[var(--kz-fg-dim)]">公告正文</label>
+                  <textarea
+                    rows={3}
+                    placeholder="可选：输入正文内容，直接回车换行"
+                    maxLength={5000}
+                    value={annContentInput}
+                    onChange={(e) => setAnnContentInput(e.target.value)}
+                    className="w-full rounded-xl border border-[var(--kz-border)] bg-[var(--kz-bg-soft)] px-3 py-2 text-xs text-[var(--kz-fg)] placeholder-[var(--kz-fg-dim)] outline-none focus:border-[var(--kz-accent)] resize-y"
+                  />
+                </div>
+
+                {/* 图片 URL 与本地上传 */}
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[var(--kz-fg-dim)]">公告图片</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      autoComplete="off"
+                      placeholder="可选：输入图片 URL 外链"
+                      value={annImageUrlInput}
+                      onChange={(e) => setAnnImageUrlInput(e.target.value)}
+                      className="flex-1 rounded-xl border border-[var(--kz-border)] bg-[var(--kz-bg-soft)] px-3 py-2 text-xs text-[var(--kz-fg)] placeholder-[var(--kz-fg-dim)] outline-none focus:border-[var(--kz-accent)]"
+                    />
+                    <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] hover:bg-[var(--kz-bg-soft)] text-xs text-[var(--kz-fg)] cursor-pointer shrink-0 transition-colors">
+                      <span>📁 {annUploading ? '上传中…' : '本地上传'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={annUploading}
+                        onChange={handleAnnouncementImageUpload}
+                        className="hidden"
+                      />
+                    </label>
+                    {annImageUrlInput && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnnImageUrlInput('')
+                          setAnnHeightInput(0)
+                        }}
+                        className="px-2.5 py-1 text-xs text-[var(--kz-fg-dim)] hover:text-rose-400 cursor-pointer"
+                        title="清除图片"
+                      >
+                        ✕ 清除
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 自定义图片展示区域控制面板（纯 CSS 零重传，外链与本地图片通用） */}
+                  {annImageUrlInput && (
+                    <div className="p-3.5 rounded-xl border border-[var(--kz-border)]/60 bg-[var(--kz-bg-soft)]/70 space-y-3 mt-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs font-semibold text-[var(--kz-fg)] flex items-center gap-1.5">
+                          <span>📐</span> 自定义展示高宽与缩放 (免重传 · 纯效果调控)
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAnnHeightInput(0)
+                            setAnnWidthInput(100)
+                            setAnnOffsetXInput(50)
+                            setAnnOffsetYInput(50)
+                            setAnnZoomInput(1)
+                          }}
+                          className="text-[11px] text-[var(--kz-fg-dim)] hover:text-[var(--kz-accent)] transition-colors cursor-pointer"
+                        >
+                          重置所有参数
+                        </button>
+                      </div>
+
+                      {/* 模式选择：原图完整呈现 vs 自定义截取 */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAnnHeightInput(0)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                            !annHeightInput
+                              ? 'border-[var(--kz-accent)] bg-[var(--kz-accent)]/15 text-[var(--kz-accent)]'
+                              : 'border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] text-[var(--kz-fg-muted)]'
+                          }`}
+                        >
+                          完整高度自适应
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!annHeightInput) setAnnHeightInput(200)
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                            annHeightInput > 0
+                              ? 'border-[var(--kz-accent)] bg-[var(--kz-accent)]/15 text-[var(--kz-accent)]'
+                              : 'border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] text-[var(--kz-fg-muted)]'
+                          }`}
+                        >
+                          固定高度截取
+                        </button>
+                      </div>
+
+                      {/* 调控参数区 */}
+                      <div className="space-y-3 pt-1 border-t border-[var(--kz-border)]/30">
+                        {/* 1. 宽度占比设置 */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px] text-[var(--kz-fg-muted)]">
+                            <span>展示宽度占比</span>
+                            <span className="font-mono">{annWidthInput}%</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {[50, 75, 100].map((w) => (
+                              <button
+                                key={w}
+                                type="button"
+                                onClick={() => setAnnWidthInput(w)}
+                                className={`px-2 py-0.5 rounded text-[11px] border cursor-pointer ${
+                                  annWidthInput === w
+                                    ? 'border-[var(--kz-accent)] text-[var(--kz-accent)] bg-[var(--kz-accent)]/10 font-semibold'
+                                    : 'border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] text-[var(--kz-fg-muted)]'
+                                }`}
+                              >
+                                {w === 100 ? '100% 铺满' : `${w}%`}
+                              </button>
+                            ))}
+                            <input
+                              type="range"
+                              min="30"
+                              max="100"
+                              step="5"
+                              value={annWidthInput}
+                              onChange={(e) => setAnnWidthInput(Number(e.target.value))}
+                              className="flex-1 accent-[var(--kz-accent)] cursor-pointer"
+                            />
+                          </div>
+                        </div>
+
+                        {/* 2. 高度选择（当固定高度时生效） */}
+                        {annHeightInput > 0 && (
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[11px] text-[var(--kz-fg-muted)]">
+                              <span>展示高度</span>
+                              <span className="font-mono">{annHeightInput}px</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {[140, 200, 260, 320].map((h) => (
+                                <button
+                                  key={h}
+                                  type="button"
+                                  onClick={() => setAnnHeightInput(h)}
+                                  className={`px-2 py-0.5 rounded text-[11px] border cursor-pointer ${
+                                    annHeightInput === h
+                                      ? 'border-[var(--kz-accent)] text-[var(--kz-accent)] bg-[var(--kz-accent)]/10 font-semibold'
+                                      : 'border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] text-[var(--kz-fg-muted)]'
+                                  }`}
+                                >
+                                  {h}px
+                                </button>
+                              ))}
+                              <input
+                                type="range"
+                                min="100"
+                                max="450"
+                                step="10"
+                                value={annHeightInput}
+                                onChange={(e) => setAnnHeightInput(Number(e.target.value))}
+                                className="flex-1 accent-[var(--kz-accent)] cursor-pointer"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 3. 画面缩放（支持缩小与放大） */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px] text-[var(--kz-fg-muted)]">
+                            <span>画面缩放 (缩小 / 放大)</span>
+                            <span className="font-mono">
+                              {Math.round(annZoomInput * 100)}% {annZoomInput < 1 ? '(缩小)' : annZoomInput > 1 ? '(放大)' : '(原始)'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {[0.5, 0.75, 1, 1.25, 1.5].map((z) => (
+                              <button
+                                key={z}
+                                type="button"
+                                onClick={() => setAnnZoomInput(z)}
+                                className={`px-2 py-0.5 rounded text-[11px] border cursor-pointer ${
+                                  Math.abs(annZoomInput - z) < 0.02
+                                    ? 'border-[var(--kz-accent)] text-[var(--kz-accent)] bg-[var(--kz-accent)]/10 font-semibold'
+                                    : 'border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] text-[var(--kz-fg-muted)]'
+                                }`}
+                              >
+                                {z === 1 ? '100% 原始' : `${Math.round(z * 100)}%`}
+                              </button>
+                            ))}
+                            <input
+                              type="range"
+                              min="0.3"
+                              max="2.5"
+                              step="0.05"
+                              value={annZoomInput}
+                              onChange={(e) => setAnnZoomInput(Number(e.target.value))}
+                              className="flex-1 accent-[var(--kz-accent)] cursor-pointer"
+                            />
+                            {annZoomInput !== 1 && (
+                              <button
+                                type="button"
+                                onClick={() => setAnnZoomInput(1)}
+                                className="text-[11px] text-[var(--kz-fg-dim)] hover:text-[var(--kz-accent)] cursor-pointer"
+                              >
+                                还原100%
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 4. 水平与垂直展示焦点 (X / Y 轴偏移) */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                          {/* X 轴 */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[11px] text-[var(--kz-fg-muted)]">
+                              <span>水平焦点 (X轴)</span>
+                              <span className="font-mono">{annOffsetXInput}%</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              {[0, 50, 100].map((x) => (
+                                <button
+                                  key={x}
+                                  type="button"
+                                  onClick={() => setAnnOffsetXInput(x)}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] border cursor-pointer ${
+                                    annOffsetXInput === x
+                                      ? 'border-[var(--kz-accent)] text-[var(--kz-accent)] bg-[var(--kz-accent)]/10'
+                                      : 'border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] text-[var(--kz-fg-muted)]'
+                                  }`}
+                                >
+                                  {x === 0 ? '左' : x === 50 ? '中' : '右'}
+                                </button>
+                              ))}
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={annOffsetXInput}
+                                onChange={(e) => setAnnOffsetXInput(Number(e.target.value))}
+                                className="flex-1 accent-[var(--kz-accent)] cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Y 轴 */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[11px] text-[var(--kz-fg-muted)]">
+                              <span>垂直焦点 (Y轴)</span>
+                              <span className="font-mono">{annOffsetYInput}%</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              {[0, 50, 100].map((y) => (
+                                <button
+                                  key={y}
+                                  type="button"
+                                  onClick={() => setAnnOffsetYInput(y)}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] border cursor-pointer ${
+                                    annOffsetYInput === y
+                                      ? 'border-[var(--kz-accent)] text-[var(--kz-accent)] bg-[var(--kz-accent)]/10'
+                                      : 'border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] text-[var(--kz-fg-muted)]'
+                                  }`}
+                                >
+                                  {y === 0 ? '顶' : y === 50 ? '中' : '底'}
+                                </button>
+                              ))}
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={annOffsetYInput}
+                                onChange={(e) => setAnnOffsetYInput(Number(e.target.value))}
+                                className="flex-1 accent-[var(--kz-accent)] cursor-pointer"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 实时即时交互视口 */}
+                      <div className="space-y-1">
+                        <div className="text-[11px] text-[var(--kz-fg-dim)]">当前效果实时预览：</div>
+                        <div
+                          className="w-full rounded-xl border border-[var(--kz-border)] bg-black/10 overflow-hidden flex items-center justify-center relative select-none"
+                          style={{
+                            height: annHeightInput > 0 ? `${annHeightInput}px` : 'auto',
+                            maxHeight: '260px',
+                          }}
+                        >
+                          <img
+                            src={annImageUrlInput}
+                            alt="区域预览"
+                            style={{
+                              height: annHeightInput > 0 ? '100%' : 'auto',
+                              width: `${annWidthInput}%`,
+                              maxWidth: '100%',
+                              objectFit: annHeightInput > 0 ? 'cover' : 'contain',
+                              objectPosition: `${annOffsetXInput}% ${annOffsetYInput}%`,
+                              transform: annZoomInput !== 1 ? `scale(${annZoomInput})` : undefined,
+                            }}
+                            className="block transition-all duration-150"
+                            onError={() => {}}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 图片跳转链接 */}
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[var(--kz-fg-dim)]">图片跳转链接</label>
+                  <input
+                    type="url"
+                    autoComplete="off"
+                    placeholder="可选：点击图片跳转的网址 (https://...)"
+                    value={annImageLinkInput}
+                    onChange={(e) => setAnnImageLinkInput(e.target.value)}
+                    className="w-full rounded-xl border border-[var(--kz-border)] bg-[var(--kz-bg-soft)] px-3 py-2 text-xs text-[var(--kz-fg)] placeholder-[var(--kz-fg-dim)] outline-none focus:border-[var(--kz-accent)]"
+                  />
+                </div>
+
+                {/* 卡片尺寸与字号 */}
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[var(--kz-fg-dim)]">卡片尺寸与字号</label>
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        { key: 'compact', label: '紧凑 (360px · 简报)' },
+                        { key: 'standard', label: '标准 (460px · 推荐)' },
+                        { key: 'large', label: '宽幅 (560px · 大字号)' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setAnnSizeInput(opt.key)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                          annSizeInput === opt.key
+                            ? 'border-[var(--kz-accent)] bg-[var(--kz-accent)]/10 text-[var(--kz-accent)]'
+                            : 'border-[var(--kz-border)] bg-[var(--kz-bg-soft)] text-[var(--kz-fg-muted)] hover:text-[var(--kz-fg)]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 保存与预览 */}
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <button
+                    type="button"
+                    disabled={annSaving}
+                    onClick={handleSaveAnnouncement}
+                    className="inline-flex items-center justify-center rounded-xl bg-[var(--kz-accent)] px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-[var(--kz-accent-hover)] active:scale-95 disabled:opacity-50 cursor-pointer"
+                  >
+                    {annSaving ? '保存中…' : '保存公告'}
+                  </button>
+
+                  {(annTitleInput || annContentInput || annImageUrlInput) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreviewAnnouncement({
+                          id: 'preview',
+                          title: annTitleInput || undefined,
+                          content: annContentInput || undefined,
+                          imageUrl: annImageUrlInput || undefined,
+                          imageLink: annImageLinkInput || undefined,
+                          size: annSizeInput,
+                          imageHeight: annHeightInput,
+                          imageWidth: annWidthInput,
+                          imageOffsetX: annOffsetXInput,
+                          imageOffsetY: annOffsetYInput,
+                          imageZoom: annZoomInput,
+                          updatedAt: Date.now(),
+                        })
+                      }}
+                      className="inline-flex items-center justify-center rounded-xl border border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] px-3 py-2 text-xs font-medium text-[var(--kz-fg)] hover:bg-[var(--kz-bg-soft)] active:scale-95 cursor-pointer"
+                    >
+                      👁️ 预览弹窗
+                    </button>
+                  )}
+
+                  {annMsg && <span className="text-xs text-[var(--kz-fg-muted)]">{annMsg}</span>}
+                </div>
+              </div>
+
+              {/* 历史公告列表 */}
+              {announcementHistory.length > 0 && (
+                <div className="space-y-2 pt-3 border-t border-[var(--kz-border)]/30">
+                  <div className="text-[11px] font-semibold text-[var(--kz-fg-dim)]">
+                    📜 历史公告 ({announcementHistory.length})
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {announcementHistory.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[var(--kz-bg-soft)]/60 border border-[var(--kz-border)]/40 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-[var(--kz-fg)] truncate">
+                            {item.title ||
+                              item.content?.slice(0, 30) ||
+                              (item.imageUrl ? '[仅图片公告]' : '无标题公告')}
+                          </div>
+                          <div className="text-[10px] text-[var(--kz-fg-dim)]">
+                            {new Date(item.updatedAt).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAnnTitleInput(item.title || '')
+                              setAnnContentInput(item.content || '')
+                              setAnnImageUrlInput(item.imageUrl || '')
+                              setAnnImageLinkInput(item.imageLink || '')
+                              setAnnSizeInput(item.size || 'standard')
+                              setAnnHeightInput(item.imageHeight || 0)
+                              setAnnWidthInput(typeof item.imageWidth === 'number' ? item.imageWidth : 100)
+                              setAnnOffsetXInput(typeof item.imageOffsetX === 'number' ? item.imageOffsetX : 50)
+                              setAnnOffsetYInput(typeof item.imageOffsetY === 'number' ? item.imageOffsetY : 50)
+                              setAnnZoomInput(typeof item.imageZoom === 'number' ? item.imageZoom : 1)
+                              setAnnEnabledInput(true)
+                              setAnnMsg('已填入历史公告内容，可编辑后保存')
+                            }}
+                            className="px-2 py-1 rounded-lg border border-[var(--kz-border)] bg-[var(--kz-bg-elevated)] hover:bg-[var(--kz-bg-soft)] text-[11px] text-[var(--kz-fg)] transition-colors cursor-pointer"
+                          >
+                            填入并编辑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteHistory(item.id)}
+                            className="p-1 rounded-lg text-[var(--kz-fg-dim)] hover:text-rose-400 text-[11px] transition-colors cursor-pointer"
+                            title="删除记录"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* IndexNow 搜索引擎推送 */}
             <div className="space-y-2 pt-3 border-t border-[var(--kz-border)]/40">
               <div className="text-xs font-bold text-[var(--kz-fg)] flex items-center gap-1.5">
@@ -1857,6 +2466,13 @@ function AdminPanelSection({
           onCancel={() => {
             setCropModalData(null)
           }}
+        />
+      )}
+
+      {previewAnnouncement && (
+        <SiteAnnouncementModal
+          announcement={previewAnnouncement}
+          onClose={() => setPreviewAnnouncement(null)}
         />
       )}
     </CollapsibleSection>

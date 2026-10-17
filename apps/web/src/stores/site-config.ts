@@ -1,6 +1,21 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
 
+export interface AnnouncementItem {
+  id: string
+  title?: string
+  content?: string
+  imageUrl?: string
+  imageLink?: string
+  size?: 'compact' | 'standard' | 'large'
+  imageHeight?: number
+  imageWidth?: number
+  imageOffsetX?: number
+  imageOffsetY?: number
+  imageZoom?: number
+  updatedAt: number
+}
+
 export interface SiteConfigState {
   siteName: string
   siteTagline: string
@@ -8,6 +23,11 @@ export interface SiteConfigState {
   iconUrl: string
   iconUpdatedAt: number
   isLoaded: boolean
+
+  // 站点公告
+  announcementEnabled: boolean
+  announcement: AnnouncementItem | null
+  announcementHistory: AnnouncementItem[]
 
   // 管理模式会话状态（仅当前会话有效）
   adminSecret: string
@@ -26,6 +46,24 @@ export interface SiteConfigState {
   resetIcon: () => Promise<void>
   resetAllConfig: () => Promise<void>
   triggerIndexNow: () => Promise<{ ok: boolean; submitted?: number; message?: string }>
+
+  // 公告管理方法
+  saveAnnouncement: (data: {
+    enabled: boolean
+    title?: string
+    content?: string
+    imageUrl?: string
+    imageLink?: string
+    size?: 'compact' | 'standard' | 'large'
+    imageHeight?: number
+    imageWidth?: number
+    imageOffsetX?: number
+    imageOffsetY?: number
+    imageZoom?: number
+  }) => Promise<{ ok: boolean; message?: string }>
+  uploadAnnouncementImage: (file: File) => Promise<{ ok: boolean; imageUrl?: string; message?: string }>
+  fetchAnnouncementHistory: () => Promise<void>
+  deleteAnnouncementHistory: (id: string) => Promise<void>
 }
 
 const ADMIN_STORAGE_KEY = 'animaku-admin-secret'
@@ -37,6 +75,8 @@ interface CachedSiteConfig {
   iconMode: 'default' | 'upload' | 'url'
   iconUrl: string
   iconUpdatedAt: number
+  announcementEnabled?: boolean
+  announcement?: AnnouncementItem | null
 }
 
 function getInitialSiteConfig(): CachedSiteConfig {
@@ -47,6 +87,8 @@ function getInitialSiteConfig(): CachedSiteConfig {
       iconMode: 'default',
       iconUrl: '',
       iconUpdatedAt: 0,
+      announcementEnabled: false,
+      announcement: null,
     }
   }
 
@@ -64,6 +106,11 @@ function getInitialSiteConfig(): CachedSiteConfig {
             : 'default',
           iconUrl: typeof parsed.iconUrl === 'string' ? parsed.iconUrl : '',
           iconUpdatedAt: typeof parsed.iconUpdatedAt === 'number' ? parsed.iconUpdatedAt : 0,
+          announcementEnabled: Boolean(parsed.announcementEnabled),
+          announcement:
+            parsed.announcement && typeof parsed.announcement === 'object'
+              ? parsed.announcement
+              : null,
         }
       }
     }
@@ -78,6 +125,8 @@ function getInitialSiteConfig(): CachedSiteConfig {
       iconMode: 'default',
       iconUrl: '',
       iconUpdatedAt: 0,
+      announcementEnabled: false,
+      announcement: null,
     }
   }
 
@@ -87,6 +136,8 @@ function getInitialSiteConfig(): CachedSiteConfig {
     iconMode: 'default',
     iconUrl: '',
     iconUpdatedAt: 0,
+    announcementEnabled: false,
+    announcement: null,
   }
 }
 
@@ -174,6 +225,9 @@ export const useSiteConfigStore = create<SiteConfigState>((set, get) => ({
   iconMode: initialConfig.iconMode,
   iconUrl: initialConfig.iconUrl,
   iconUpdatedAt: initialConfig.iconUpdatedAt,
+  announcementEnabled: initialConfig.announcementEnabled ?? false,
+  announcement: initialConfig.announcement ?? null,
+  announcementHistory: [],
   isLoaded: false,
 
   adminSecret: initialSecret,
@@ -188,6 +242,8 @@ export const useSiteConfigStore = create<SiteConfigState>((set, get) => ({
         iconMode: 'default' | 'upload' | 'url'
         iconUrl: string
         iconUpdatedAt: number
+        announcementEnabled: boolean
+        announcement: AnnouncementItem | null
       }>('/api/site/config')
 
       if (res && res.ok) {
@@ -197,6 +253,8 @@ export const useSiteConfigStore = create<SiteConfigState>((set, get) => ({
           iconMode: res.iconMode || 'default',
           iconUrl: res.iconUrl || '',
           iconUpdatedAt: res.iconUpdatedAt || 0,
+          announcementEnabled: Boolean(res.announcementEnabled),
+          announcement: res.announcement || null,
         }
 
         set({
@@ -372,6 +430,9 @@ export const useSiteConfigStore = create<SiteConfigState>((set, get) => ({
         iconMode: 'default',
         iconUrl: '',
         iconUpdatedAt: res.data?.iconUpdatedAt || Date.now(),
+        announcementEnabled: false,
+        announcement: null,
+        announcementHistory: [],
       })
       updateDocumentFavicon('default')
     }
@@ -391,5 +452,113 @@ export const useSiteConfigStore = create<SiteConfigState>((set, get) => ({
       body: JSON.stringify({ forceAll: true }),
     })
     return res
+  },
+
+  saveAnnouncement: async (data) => {
+    const { adminSecret } = get()
+    try {
+      const res = await api<{
+        ok: boolean
+        message?: string
+        error?: string
+        data?: {
+          announcementEnabled: boolean
+          announcement: AnnouncementItem | null
+          announcementHistory: AnnouncementItem[]
+        }
+      }>('/api/admin/site/announcement', {
+        method: 'POST',
+        headers: {
+          'X-Admin-Secret': adminSecret,
+        },
+        body: JSON.stringify(data),
+      })
+
+      if (res && res.ok && res.data) {
+        set({
+          announcementEnabled: res.data.announcementEnabled,
+          announcement: res.data.announcement,
+          announcementHistory: res.data.announcementHistory,
+        })
+        const currentCached = getInitialSiteConfig()
+        saveSiteConfigToCache({
+          ...currentCached,
+          announcementEnabled: res.data.announcementEnabled,
+          announcement: res.data.announcement,
+        })
+        return { ok: true, message: res.message || '公告已保存' }
+      }
+      return { ok: false, message: res?.error || res?.message || '保存失败' }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, message: msg }
+    }
+  },
+
+  uploadAnnouncementImage: async (file: File) => {
+    const { adminSecret } = get()
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await api<{
+        ok: boolean
+        imageUrl?: string
+        message?: string
+        error?: string
+      }>('/api/admin/site/upload-announcement-image', {
+        method: 'POST',
+        headers: {
+          'X-Admin-Secret': adminSecret,
+        },
+        body: formData,
+      })
+
+      if (res && res.ok && res.imageUrl) {
+        return { ok: true, imageUrl: res.imageUrl, message: res.message }
+      }
+      return { ok: false, message: res?.error || res?.message || '上传失败' }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, message: msg }
+    }
+  },
+
+  fetchAnnouncementHistory: async () => {
+    const { adminSecret } = get()
+    try {
+      const res = await api<{
+        ok: boolean
+        data?: AnnouncementItem[]
+      }>('/api/admin/site/announcement-history', {
+        headers: {
+          'X-Admin-Secret': adminSecret,
+        },
+      })
+      if (res && res.ok && Array.isArray(res.data)) {
+        set({ announcementHistory: res.data })
+      }
+    } catch (err) {
+      console.warn('[site-config] 获取历史公告失败:', err)
+    }
+  },
+
+  deleteAnnouncementHistory: async (id: string) => {
+    const { adminSecret } = get()
+    try {
+      const res = await api<{
+        ok: boolean
+        data?: AnnouncementItem[]
+      }>(`/api/admin/site/announcement-history/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: {
+          'X-Admin-Secret': adminSecret,
+        },
+      })
+      if (res && res.ok && Array.isArray(res.data)) {
+        set({ announcementHistory: res.data })
+      }
+    } catch (err) {
+      console.warn('[site-config] 删除历史公告失败:', err)
+    }
   },
 }))

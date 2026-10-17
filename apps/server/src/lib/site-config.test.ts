@@ -5,6 +5,9 @@ import path from 'node:path'
 import os from 'node:os'
 import {
   validateIconBuffer,
+  validateAnnouncementImageBuffer,
+  saveAnnouncementImage,
+  deleteAnnouncementHistoryItem,
   getSiteConfig,
   saveSiteConfig,
   saveCustomFavicon,
@@ -194,4 +197,91 @@ test('site-config: generateIconSuite and saveCustomFavicon creates unified multi
   // Clean up test state so it does not pollute other tests
   resetAllSiteConfig()
 })
+
+test('validateAnnouncementImageBuffer: correctly verifies PNG/JPEG/WebP/GIF and blocks non-images', () => {
+  // GIF: GIF89a
+  const gifBuf = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00])
+  const gifRes = validateAnnouncementImageBuffer(gifBuf)
+  assert.equal(gifRes.valid, true)
+  assert.equal(gifRes.mime, 'image/gif')
+  assert.equal(gifRes.ext, 'gif')
+
+  // PNG
+  const pngBuf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const pngRes = validateAnnouncementImageBuffer(pngBuf)
+  assert.equal(pngRes.valid, true)
+  assert.equal(pngRes.mime, 'image/png')
+  assert.equal(pngRes.ext, 'png')
+
+  // Invalid: HTML / SVG
+  const htmlBuf = Buffer.from('<html><head></head><body>bad</body></html>')
+  const htmlRes = validateAnnouncementImageBuffer(htmlBuf)
+  assert.equal(htmlRes.valid, false)
+})
+
+test('site-config: announcement save, history archiving, deletion, and public endpoint', async () => {
+  // 1. Initially disabled
+  saveSiteConfig({ announcementEnabled: false, announcement: null, announcementHistory: [] })
+  const initialCfg = getSiteConfig()
+  assert.equal(initialCfg.announcementEnabled, false)
+
+  // 2. Reject enabling when all fields are empty
+  const emptyRes = await adminSiteRoutes.request('/site/announcement', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: true, title: '', content: '', imageUrl: '' }),
+  })
+  assert.equal(emptyRes.status, 400)
+  const emptyJson = (await emptyRes.json()) as { error: string }
+  assert.match(emptyJson.error, /至少需要填写一项/)
+
+  // 3. Save a valid announcement with title only
+  const saveRes = await adminSiteRoutes.request('/site/announcement', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      enabled: true,
+      title: '系统维护通知',
+      content: '今晚 12 点进行线路切换',
+      imageUrl: '',
+      imageLink: 'https://example.com/notice',
+    }),
+  })
+  assert.equal(saveRes.status, 200)
+  const saveJson = (await saveRes.json()) as { ok: boolean; data: { announcement: { id: string; title: string } } }
+  assert.equal(saveJson.ok, true)
+  assert.equal(saveJson.data.announcement.title, '系统维护通知')
+  const annId = saveJson.data.announcement.id
+  assert.ok(annId)
+
+  // Verify public endpoint returns the announcement
+  const publicRes = await siteRoutes.request('/config')
+  assert.equal(publicRes.status, 200)
+  const publicJson = (await publicRes.json()) as {
+    ok: boolean
+    announcementEnabled: boolean
+    announcement: { id: string; title: string }
+  }
+  assert.equal(publicJson.announcementEnabled, true)
+  assert.equal(publicJson.announcement.id, annId)
+  assert.equal(publicJson.announcement.title, '系统维护通知')
+
+  // Verify history contains this announcement
+  const histRes = await adminSiteRoutes.request('/site/announcement-history')
+  const histJson = (await histRes.json()) as { ok: boolean; data: Array<{ id: string; title: string }> }
+  assert.equal(histJson.ok, true)
+  assert.ok(histJson.data.some((h) => h.id === annId))
+
+  // Delete this announcement from history
+  const delRes = await adminSiteRoutes.request(`/site/announcement-history/${annId}`, {
+    method: 'DELETE',
+  })
+  assert.equal(delRes.status, 200)
+  const delJson = (await delRes.json()) as { ok: boolean; data: Array<{ id: string }> }
+  assert.ok(!delJson.data.some((h) => h.id === annId))
+
+  // Clean up
+  resetAllSiteConfig()
+})
+
 

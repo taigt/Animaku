@@ -114,6 +114,7 @@
 - 路由预加载与意图预取中心：`apps/web/src/lib/route-preload.ts`
 - 首页 (热门番剧、分类板块、继续观看)：`apps/web/src/pages/HomePage.tsx`
 - 首页 3D 影院海报轮播 (Cover Flow)：`apps/web/src/components/HeroCoverFlow.tsx`, `apps/web/src/components/HeroCoverFlowSkeleton.tsx`, `apps/web/src/components/hero-cover-flow.constants.ts`
+- 首页站点公告弹窗组件：`apps/web/src/components/SiteAnnouncementModal.tsx`
 - 每日放送时间表页：`apps/web/src/pages/TimelinePage.tsx`
 - 番剧索引与分类筛选页：`apps/web/src/pages/AnimePage.tsx`
 - 搜索结果页：`apps/web/src/pages/SearchPage.tsx`

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { Hono } from 'hono'
 import { isAuthorizedAdmin } from '../lib/indexnow'
 import {
@@ -10,7 +11,12 @@ import {
   validateIconBuffer,
   getCustomFaviconPath,
   hasCustomFavicon,
+  getAnnouncementUploadsDir,
+  validateAnnouncementImageBuffer,
+  saveAnnouncementImage,
+  deleteAnnouncementHistoryItem,
   type SiteConfig,
+  type AnnouncementItem,
 } from '../lib/site-config'
 
 export const siteRoutes = new Hono()
@@ -25,7 +31,7 @@ function isValidHttpUrl(urlStr: string): boolean {
 }
 
 /**
- * 公开接口：获取当前站点品牌与自定义图标配置
+ * 公开接口：获取当前站点品牌与自定义图标配置及站点公告
  */
 siteRoutes.get('/config', (c) => {
   const cfg = getSiteConfig()
@@ -36,7 +42,50 @@ siteRoutes.get('/config', (c) => {
     iconMode: cfg.iconMode || 'default',
     iconUrl: cfg.iconUrl || '',
     iconUpdatedAt: cfg.iconUpdatedAt || 0,
+    announcementEnabled: Boolean(cfg.announcementEnabled),
+    announcement: cfg.announcement || null,
   })
+})
+
+/**
+ * 公开接口：提供上传的站点公告图片静态访问服务
+ */
+siteRoutes.get('/announcement-image/:filename', (c) => {
+  const filename = c.req.param('filename')
+  // 严格文件名正则校验，彻底杜绝路径穿越与非图片文件读取
+  if (!filename || !/^[a-zA-Z0-9_-]+\.(png|jpe?g|webp|gif)$/i.test(filename)) {
+    return c.text('Invalid filename', 400)
+  }
+
+  const dir = getAnnouncementUploadsDir()
+  const filePath = resolve(dir, filename)
+  if (!existsSync(filePath)) {
+    return c.text('Image not found', 404)
+  }
+
+  try {
+    const data = readFileSync(filePath)
+    const ext = filename.split('.').pop()?.toLowerCase() || ''
+    const mimeMap: Record<string, string> = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      webp: 'image/webp',
+      gif: 'image/gif',
+    }
+    const contentType = mimeMap[ext] || 'image/png'
+
+    return new Response(data, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'public, max-age=86400',
+      },
+    })
+  } catch {
+    return c.text('Error reading image', 500)
+  }
 })
 
 /**
@@ -237,6 +286,211 @@ adminSiteRoutes.post('/site/reset-all', (c) => {
     })
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : '全局重置失败'
+    return c.json({ ok: false, error: errMsg, message: errMsg }, 500)
+  }
+})
+
+/**
+ * 更新站点公告配置（开关、标题、正文、图片、图片跳转链接）
+ */
+adminSiteRoutes.post('/site/announcement', async (c) => {
+  interface AnnouncementBody {
+    enabled?: boolean
+    title?: string
+    content?: string
+    imageUrl?: string
+    imageLink?: string
+    size?: 'compact' | 'standard' | 'large'
+    imageHeight?: number
+    imageWidth?: number
+    imageOffsetX?: number
+    imageOffsetY?: number
+    imageZoom?: number
+  }
+
+  const body = (await c.req.json<AnnouncementBody>().catch(() => ({}))) as AnnouncementBody
+  const enabled = Boolean(body.enabled)
+
+  const title = typeof body.title === 'string' ? body.title.trim().slice(0, 100) : ''
+  const content = typeof body.content === 'string' ? body.content.trim().slice(0, 5000) : ''
+  const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl.trim().slice(0, 1000) : ''
+  const imageLink = typeof body.imageLink === 'string' ? body.imageLink.trim().slice(0, 1000) : ''
+  const size: 'compact' | 'standard' | 'large' =
+    body.size && ['compact', 'standard', 'large'].includes(body.size) ? body.size : 'standard'
+  const imageHeight = typeof body.imageHeight === 'number' && body.imageHeight >= 0 ? body.imageHeight : undefined
+  const imageWidth = typeof body.imageWidth === 'number' ? Math.max(30, Math.min(100, body.imageWidth)) : undefined
+  const imageOffsetX = typeof body.imageOffsetX === 'number' ? Math.max(0, Math.min(100, body.imageOffsetX)) : undefined
+  const imageOffsetY = typeof body.imageOffsetY === 'number' ? Math.max(0, Math.min(100, body.imageOffsetY)) : undefined
+  const imageZoom = typeof body.imageZoom === 'number' ? Math.max(0.3, Math.min(2.5, body.imageZoom)) : undefined
+
+  const hasContent = Boolean(title || content || imageUrl)
+
+  // 开启公告时，必须至少填写了一项（标题、正文、图片其一）
+  if (enabled && !hasContent) {
+    const errMsg = '开启公告时，标题、正文或图片至少需要填写一项'
+    return c.json({ ok: false, error: errMsg, message: errMsg }, 400)
+  }
+
+  // 校验链接格式
+  if (imageUrl && !imageUrl.startsWith('/') && !isValidHttpUrl(imageUrl)) {
+    const errMsg = '公告图片链接必须为合法网址或站内路径'
+    return c.json({ ok: false, error: errMsg, message: errMsg }, 400)
+  }
+  if (imageLink && !imageLink.startsWith('/') && !isValidHttpUrl(imageLink)) {
+    const errMsg = '图片跳转链接必须为合法网址 (http:// 或 https://)'
+    return c.json({ ok: false, error: errMsg, message: errMsg }, 400)
+  }
+
+  const currentCfg = getSiteConfig()
+  const current = currentCfg.announcement
+
+  // 判断内容是否有实质变更（以此决定是否刷新版本 ID 与已读缓存击穿时间戳）
+  const isContentChanged =
+    !current ||
+    (current.title || '') !== title ||
+    (current.content || '') !== content ||
+    (current.imageUrl || '') !== imageUrl ||
+    (current.imageLink || '') !== imageLink ||
+    (current.size || 'standard') !== size ||
+    (current.imageHeight ?? undefined) !== imageHeight ||
+    (current.imageWidth ?? undefined) !== imageWidth ||
+    (current.imageOffsetX ?? undefined) !== imageOffsetX ||
+    (current.imageOffsetY ?? undefined) !== imageOffsetY ||
+    (current.imageZoom ?? undefined) !== imageZoom
+
+  let nextAnnouncement: AnnouncementItem | null = null
+  let nextHistory = currentCfg.announcementHistory || []
+
+  if (hasContent) {
+    nextAnnouncement = {
+      id: isContentChanged ? `ann_${Date.now()}` : (current?.id || `ann_${Date.now()}`),
+      title: title || undefined,
+      content: content || undefined,
+      imageUrl: imageUrl || undefined,
+      imageLink: imageLink || undefined,
+      size,
+      imageHeight,
+      imageWidth,
+      imageOffsetX,
+      imageOffsetY,
+      imageZoom,
+      updatedAt: isContentChanged ? Date.now() : (current?.updatedAt || Date.now()),
+    }
+
+    if (isContentChanged) {
+      nextHistory = [
+        nextAnnouncement,
+        ...nextHistory.filter((item) => item.id !== nextAnnouncement?.id),
+      ].slice(0, 30)
+    }
+  }
+
+  try {
+    const saved = saveSiteConfig({
+      announcementEnabled: enabled,
+      announcement: nextAnnouncement,
+      announcementHistory: nextHistory,
+    })
+
+    return c.json({
+      ok: true,
+      message: '公告配置已保存',
+      data: {
+        announcementEnabled: saved.announcementEnabled,
+        announcement: saved.announcement,
+        announcementHistory: saved.announcementHistory,
+      },
+    })
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : '保存公告失败'
+    return c.json({ ok: false, error: errMsg, message: errMsg }, 500)
+  }
+})
+
+/**
+ * 获取历史公告归档列表
+ */
+adminSiteRoutes.get('/site/announcement-history', (c) => {
+  const cfg = getSiteConfig()
+  return c.json({
+    ok: true,
+    data: cfg.announcementHistory || [],
+  })
+})
+
+/**
+ * 删除单条历史公告
+ */
+adminSiteRoutes.delete('/site/announcement-history/:id', (c) => {
+  const id = c.req.param('id')
+  if (!id) {
+    return c.json({ ok: false, error: '缺少 id 参数', message: '缺少 id 参数' }, 400)
+  }
+  const saved = deleteAnnouncementHistoryItem(id)
+  return c.json({
+    ok: true,
+    message: '已删除历史公告',
+    data: saved.announcementHistory || [],
+  })
+})
+
+/**
+ * 上传公告配图文件（≤5MB，支持 PNG/JPEG/WEBP/GIF）
+ */
+adminSiteRoutes.post('/site/upload-announcement-image', async (c) => {
+  try {
+    let buffer: Buffer
+    let originalName = ''
+    const contentType = c.req.header('content-type') || ''
+
+    if (contentType.includes('multipart/form-data')) {
+      let file: unknown
+      try {
+        const formData = await c.req.formData()
+        file = formData.get('file')
+      } catch {
+        const body = await c.req.parseBody()
+        file = body['file']
+      }
+
+      if (!file) {
+        return c.json(
+          { ok: false, error: '未找到上传的图片文件 (file 字段)', message: '未找到上传的图片文件 (file 字段)' },
+          400,
+        )
+      }
+
+      if (typeof (file as { arrayBuffer?: () => Promise<ArrayBuffer> }).arrayBuffer === 'function') {
+        buffer = Buffer.from(await (file as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer())
+        originalName = (file as { name?: string }).name || ''
+      } else if (typeof file === 'string') {
+        buffer = Buffer.from(file, 'utf8')
+      } else {
+        return c.json({ ok: false, error: '无法解析上传的文件内容', message: '无法解析上传的文件内容' }, 400)
+      }
+    } else {
+      const ab = await c.req.arrayBuffer()
+      buffer = Buffer.from(ab)
+    }
+
+    if (!buffer || buffer.length === 0) {
+      return c.json({ ok: false, error: '上传内容为空', message: '上传内容为空' }, 400)
+    }
+
+    const check = validateAnnouncementImageBuffer(buffer)
+    if (!check.valid) {
+      const errText = check.error || '非法图片文件'
+      return c.json({ ok: false, error: errText, message: errText }, 400)
+    }
+
+    const imageUrl = saveAnnouncementImage(buffer, check.ext)
+    return c.json({
+      ok: true,
+      imageUrl,
+      message: '图片上传成功',
+    })
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : '上传失败'
     return c.json({ ok: false, error: errMsg, message: errMsg }, 500)
   }
 })

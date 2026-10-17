@@ -3,12 +3,30 @@ import { resolve } from 'node:path'
 import sharp from 'sharp'
 import { config } from '../config'
 
+export interface AnnouncementItem {
+  id: string
+  title?: string
+  content?: string
+  imageUrl?: string
+  imageLink?: string
+  size?: 'compact' | 'standard' | 'large'
+  imageHeight?: number
+  imageWidth?: number
+  imageOffsetX?: number
+  imageOffsetY?: number
+  imageZoom?: number
+  updatedAt: number
+}
+
 export interface SiteConfig {
   siteName?: string
   siteTagline?: string
   iconMode?: 'default' | 'upload' | 'url'
   iconUrl?: string
   iconUpdatedAt?: number
+  announcementEnabled?: boolean
+  announcement?: AnnouncementItem | null
+  announcementHistory?: AnnouncementItem[]
 }
 
 const MAX_ICON_SIZE = 2 * 1024 * 1024 // 2MB
@@ -51,6 +69,93 @@ export function getCustomFaviconPath(): string {
   return resolve(config.dataDir, 'favicon.ico')
 }
 
+export function getAnnouncementUploadsDir(): string {
+  return resolve(config.dataDir, 'announcements')
+}
+
+/**
+ * 校验上传的公告配图 Buffer（支持 PNG/JPEG/WebP/GIF，限制最大 5MB）
+ */
+export function validateAnnouncementImageBuffer(buf: Buffer): {
+  valid: boolean
+  mime: string
+  ext: string
+  error?: string
+} {
+  const MAX_IMAGE_SIZE = 5 * 1024 * 1024 // 5MB
+  if (buf.length > MAX_IMAGE_SIZE) {
+    return {
+      valid: false,
+      mime: '',
+      ext: '',
+      error: `图片大小超出上限（当前大小 ${(buf.length / 1024 / 1024).toFixed(2)} MB，限制最大 5 MB）`,
+    }
+  }
+
+  if (buf.length < 4) {
+    return { valid: false, mime: '', ext: '', error: '文件内容过短，非合法图片文件' }
+  }
+
+  // 1. PNG: 89 50 4E 47 (\x89PNG)
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return { valid: true, mime: 'image/png', ext: 'png' }
+  }
+
+  // 2. JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return { valid: true, mime: 'image/jpeg', ext: 'jpg' }
+  }
+
+  // 3. WebP: RIFF....WEBP
+  if (
+    buf.length >= 12 &&
+    buf[0] === 0x52 &&
+    buf[1] === 0x49 &&
+    buf[2] === 0x46 &&
+    buf[3] === 0x46 &&
+    buf[8] === 0x57 &&
+    buf[9] === 0x45 &&
+    buf[10] === 0x42 &&
+    buf[11] === 0x50
+  ) {
+    return { valid: true, mime: 'image/webp', ext: 'webp' }
+  }
+
+  // 4. GIF: GIF87a / GIF89a
+  if (
+    buf.length >= 6 &&
+    buf[0] === 0x47 &&
+    buf[1] === 0x49 &&
+    buf[2] === 0x46 &&
+    buf[3] === 0x38 &&
+    (buf[4] === 0x37 || buf[4] === 0x39) &&
+    buf[5] === 0x61
+  ) {
+    return { valid: true, mime: 'image/gif', ext: 'gif' }
+  }
+
+  return {
+    valid: false,
+    mime: '',
+    ext: '',
+    error: '不支持的图片格式。仅允许上传 PNG、JPEG、WebP 或 GIF 格式图片',
+  }
+}
+
+/**
+ * 保存上传的公告图片到 data/announcements 目录
+ */
+export function saveAnnouncementImage(buf: Buffer, ext: string): string {
+  const dir = getAnnouncementUploadsDir()
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  const filename = `ann_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const filePath = resolve(dir, filename)
+  writeFileSync(filePath, buf)
+  return `/api/site/announcement-image/${filename}`
+}
+
 /**
  * 读取当前站点配置（内存缓存，首次同步加载）
  */
@@ -65,12 +170,58 @@ export function getSiteConfig(): SiteConfig {
       const raw = readFileSync(filePath, 'utf8')
       const parsed = JSON.parse(raw)
       if (parsed && typeof parsed === 'object') {
+        let announcement: AnnouncementItem | null = null
+        if (parsed.announcement && typeof parsed.announcement === 'object') {
+          const a = parsed.announcement
+          announcement = {
+            id: typeof a.id === 'string' && a.id ? a.id : `ann_${Date.now()}`,
+            title: typeof a.title === 'string' ? a.title.trim().slice(0, 100) : undefined,
+            content: typeof a.content === 'string' ? a.content.trim().slice(0, 5000) : undefined,
+            imageUrl: typeof a.imageUrl === 'string' ? a.imageUrl.trim().slice(0, 1000) : undefined,
+            imageLink: typeof a.imageLink === 'string' ? a.imageLink.trim().slice(0, 1000) : undefined,
+            size: ['compact', 'standard', 'large'].includes(a.size as string)
+              ? (a.size as 'compact' | 'standard' | 'large')
+              : 'standard',
+            imageHeight: typeof a.imageHeight === 'number' && a.imageHeight >= 0 ? a.imageHeight : undefined,
+            imageWidth: typeof a.imageWidth === 'number' ? Math.max(30, Math.min(100, a.imageWidth)) : undefined,
+            imageOffsetX: typeof a.imageOffsetX === 'number' ? Math.max(0, Math.min(100, a.imageOffsetX)) : undefined,
+            imageOffsetY: typeof a.imageOffsetY === 'number' ? Math.max(0, Math.min(100, a.imageOffsetY)) : undefined,
+            imageZoom: typeof a.imageZoom === 'number' ? Math.max(0.3, Math.min(2.5, a.imageZoom)) : undefined,
+            updatedAt: typeof a.updatedAt === 'number' ? a.updatedAt : Date.now(),
+          }
+        }
+
+        const announcementHistory: AnnouncementItem[] = Array.isArray(parsed.announcementHistory)
+          ? parsed.announcementHistory
+              .filter((item: unknown): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+              .slice(0, 30)
+              .map((item: Record<string, unknown>) => ({
+                id: typeof item.id === 'string' && item.id ? item.id : `ann_${Date.now()}`,
+                title: typeof item.title === 'string' ? item.title.trim().slice(0, 100) : undefined,
+                content: typeof item.content === 'string' ? item.content.trim().slice(0, 5000) : undefined,
+                imageUrl: typeof item.imageUrl === 'string' ? item.imageUrl.trim().slice(0, 1000) : undefined,
+                imageLink: typeof item.imageLink === 'string' ? item.imageLink.trim().slice(0, 1000) : undefined,
+                size: ['compact', 'standard', 'large'].includes(item.size as string)
+                  ? (item.size as 'compact' | 'standard' | 'large')
+                  : 'standard',
+                imageHeight: typeof item.imageHeight === 'number' && item.imageHeight >= 0 ? item.imageHeight : undefined,
+                imageWidth: typeof item.imageWidth === 'number' ? Math.max(30, Math.min(100, item.imageWidth)) : undefined,
+                imageOffsetX: typeof item.imageOffsetX === 'number' ? Math.max(0, Math.min(100, item.imageOffsetX)) : undefined,
+                imageOffsetY: typeof item.imageOffsetY === 'number' ? Math.max(0, Math.min(100, item.imageOffsetY)) : undefined,
+                imageZoom: typeof item.imageZoom === 'number' ? Math.max(0.3, Math.min(2.5, item.imageZoom)) : undefined,
+                updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
+              }))
+          : []
+
         memoryCache = {
           siteName: typeof parsed.siteName === 'string' ? parsed.siteName.trim().slice(0, 50) : undefined,
           siteTagline: typeof parsed.siteTagline === 'string' ? parsed.siteTagline.trim().slice(0, 100) : undefined,
           iconMode: ['default', 'upload', 'url'].includes(parsed.iconMode) ? parsed.iconMode : 'default',
           iconUrl: typeof parsed.iconUrl === 'string' ? parsed.iconUrl.trim().slice(0, 500) : undefined,
           iconUpdatedAt: typeof parsed.iconUpdatedAt === 'number' ? parsed.iconUpdatedAt : undefined,
+          announcementEnabled: Boolean(parsed.announcementEnabled),
+          announcement,
+          announcementHistory,
         }
         return memoryCache
       }
@@ -81,6 +232,9 @@ export function getSiteConfig(): SiteConfig {
 
   memoryCache = {
     iconMode: existsSync(getCustomFaviconPath()) ? 'upload' : 'default',
+    announcementEnabled: false,
+    announcement: null,
+    announcementHistory: [],
   }
   return memoryCache
 }
@@ -98,6 +252,16 @@ export function saveSiteConfig(updates: Partial<SiteConfig>): SiteConfig {
   if (next.siteName) next.siteName = next.siteName.trim().slice(0, 50)
   if (next.siteTagline) next.siteTagline = next.siteTagline.trim().slice(0, 100)
   if (next.iconUrl) next.iconUrl = next.iconUrl.trim().slice(0, 500)
+
+  if (updates.announcementEnabled !== undefined) {
+    next.announcementEnabled = Boolean(updates.announcementEnabled)
+  }
+  if (updates.announcement !== undefined) {
+    next.announcement = updates.announcement
+  }
+  if (updates.announcementHistory !== undefined) {
+    next.announcementHistory = updates.announcementHistory.slice(0, 30)
+  }
 
   try {
     if (!existsSync(config.dataDir)) {
@@ -454,8 +618,20 @@ export function resetAllSiteConfig(): SiteConfig {
     iconMode: 'default',
     iconUrl: undefined,
     iconUpdatedAt: Date.now(),
+    announcementEnabled: false,
+    announcement: null,
+    announcementHistory: [],
   }
   return memoryCache
+}
+
+/**
+ * 删除历史公告单项
+ */
+export function deleteAnnouncementHistoryItem(id: string): SiteConfig {
+  const current = getSiteConfig()
+  const history = (current.announcementHistory || []).filter((item) => item.id !== id)
+  return saveSiteConfig({ announcementHistory: history })
 }
 
 /**

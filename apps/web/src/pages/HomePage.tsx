@@ -15,6 +15,12 @@ import { EMPTY_ARRAY } from '../lib/stable'
 import { preloadVideoPlayer } from '../player/lazy'
 import { useInView } from '../lib/use-in-view'
 import { useSiteBranding } from '../lib/site-branding'
+import { useSiteConfigStore } from '../stores/site-config'
+import {
+  SiteAnnouncementModal,
+  isAnnouncementDismissed,
+  dismissAnnouncement,
+} from '../components/SiteAnnouncementModal'
 import { DESKTOP_MEDIA_QUERY } from '../components/hero-cover-flow.constants'
 
 const SECTION_LIMIT = 18
@@ -42,6 +48,34 @@ const ovasQueryFn = ({ signal }: { signal?: AbortSignal }) =>
 export function HomePage() {
   const queryClient = useQueryClient()
   const { productName, tagline } = useSiteBranding()
+  const announcementEnabled = useSiteConfigStore((s) => s.announcementEnabled)
+  const announcement = useSiteConfigStore((s) => s.announcement)
+  const [showAnnouncement, setShowAnnouncement] = useState(false)
+
+  // 当公告配置加载完成后，进行 1 天免打扰缓存比对与展示判定
+  useEffect(() => {
+    if (!announcementEnabled || !announcement) {
+      setShowAnnouncement(false)
+      return
+    }
+    const hasContent = Boolean(announcement.title || announcement.content || announcement.imageUrl)
+    if (!hasContent) {
+      setShowAnnouncement(false)
+      return
+    }
+
+    if (!isAnnouncementDismissed(announcement.id)) {
+      setShowAnnouncement(true)
+    }
+  }, [announcementEnabled, announcement])
+
+  const handleCloseAnnouncement = () => {
+    if (announcement) {
+      dismissAnnouncement(announcement.id)
+    }
+    setShowAnnouncement(false)
+  }
+
   const [isDesktop, setIsDesktop] = useState(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       return true
@@ -306,6 +340,14 @@ export function HomePage() {
           <BangumiGridSkeleton count={SECTION_LIMIT} />
         )}
       </section>
+
+      {/* 首页站点公告弹窗 */}
+      {showAnnouncement && announcement && (
+        <SiteAnnouncementModal
+          announcement={announcement}
+          onClose={handleCloseAnnouncement}
+        />
+      )}
     </div>
   )
 }

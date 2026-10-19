@@ -81,12 +81,16 @@ RUN npm install --omit=dev sharp@0.35.5 7zip-min@3.0.1 && npm cache clean --forc
 
 # ---- runtime (node dist only; no tsx / no full monorepo src) ----
 FROM node:22-bookworm-slim AS runner
+# 必须配置 UTF-8 语言环境（glibc 原生支持 C.UTF-8），避免 7-Zip (7za) 等底层 C 工具在解压含中日文字符的压缩包时
+# 因 POSIX/C 纯 ASCII 编码无法映射字符而强制将文件名替换为 '?'
 ENV NODE_ENV=production \
     PORT=8787 \
     HOST=0.0.0.0 \
     WEB_DIST=public \
     DATA_DIR=/app/data \
-    TZ=Asia/Shanghai
+    TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 WORKDIR /app
 

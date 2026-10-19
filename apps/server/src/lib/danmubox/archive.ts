@@ -19,6 +19,15 @@ const _7z = require('7zip-min') as {
   list: (archivePath: string) => Promise<Array<{ name: string; size?: number }>>
 }
 
+// 兼容性保证：确保在 Linux 容器/宿主环境下，7za (p7zip) 子进程能继承 UTF-8 Locale，
+// 规避无 LANG 环境变量时 glibc/7za 降级为 POSIX/C 纯 ASCII 编码，导致把中日文文件名替换为 '?'
+if (!process.env.LANG) {
+  process.env.LANG = 'C.UTF-8'
+}
+if (!process.env.LC_ALL) {
+  process.env.LC_ALL = 'C.UTF-8'
+}
+
 const CACHE_BASE_DIR = path.resolve(config.dataDir, 'cache/danmubox')
 const ZIPS_DIR = path.resolve(CACHE_BASE_DIR, 'zips')
 const UNPACKED_DIR = path.resolve(CACHE_BASE_DIR, 'unpacked')
@@ -115,7 +124,21 @@ export async function ensureArchiveUnpacked(
   if (fs.existsSync(unpackDir)) {
     const existingXmls = findXmlFilesRecursively(unpackDir)
     if (existingXmls.length > 0) {
-      return sortDanmakuXmlFiles(existingXmls)
+      // 容错与历史坏缓存自愈：
+      // 在缺少 UTF-8 语言环境的历史版本中，7za 会把中日文文件名全提取为带有 '?' 的损坏文件。
+      // 合法的番剧 XML 路径中绝不可能包含 '?' 字符，若发现即判定为损坏缓存，自动清理并触发重新解压。
+      const hasCorruptedNames = existingXmls.some((f) => f.includes('?'))
+      if (!hasCorruptedNames) {
+        return sortDanmakuXmlFiles(existingXmls)
+      }
+      console.warn(
+        `[danmubox] 检测到归档包 ${safeHash} 包含被 '?' 损坏的解压文件，自动清理并重新解压...`,
+      )
+      try {
+        fs.rmSync(unpackDir, { recursive: true, force: true })
+      } catch (err) {
+        console.error(`[danmubox] 清理损坏解压缓存失败:`, err)
+      }
     }
   }
 

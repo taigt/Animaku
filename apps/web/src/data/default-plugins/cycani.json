@@ -3,7 +3,7 @@
   "type": "anime",
   "name": "cycani",
   "version": "1.0",
-  "weight": 61,
+  "weight": 60,
   "titlePreference": "chinese",
   "oldAnimePriority": true,
   "muliSources": true,

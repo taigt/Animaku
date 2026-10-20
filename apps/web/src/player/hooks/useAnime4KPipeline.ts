@@ -54,6 +54,19 @@ export function useAnime4KPipeline({
     const isCurrent = () => generationRef.current === currentGen
 
     const mode = superResolution || 'off'
+    // 超分功能维护中：保留底层代码但短路所有实际 GPU 渲染与图层激活，提示用户维护中
+    if (mode !== 'off') {
+      try {
+        anime4kStopRef.current?.()
+      } catch {
+        /* ignore */
+      }
+      anime4kStopRef.current = null
+      setSrActive(false)
+      onFlashHint('超分功能维护中，暂时无效', 3000)
+      return
+    }
+
     const video = videoRef.current
     const canvas = canvasRef.current
     if (mode === 'off' || !video || !canvas) {

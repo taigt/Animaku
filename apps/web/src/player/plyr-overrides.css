@@ -391,9 +391,9 @@ html[data-theme='light'] .kz-watch-road-chip[aria-selected='true'] {
 
 /* When SR is painting, hide native video picture (audio/seek still on <video>) */
 .kz-player-shell.kz-sr-on .kz-native-video {
-  /* visibility hides paint; opacity alone can still composite over canvas */
+  /* 仅使用 opacity: 0 隐藏原生画面。严禁添加 visibility: hidden 或 display: none，
+     否则 Chromium 内核会触发 Background Video Track Optimization 挂起视频解码管线并冻结 rVFC */
   opacity: 0 !important;
-  visibility: hidden;
 }
 
 /* Overlay for danmaku only — never opaque, never capture events.

@@ -27,7 +27,8 @@ export const tvtfunAdapter: SourceAdapter = {
     const res = await resolveTvTFun(TVTFUN_RULE, pageUrl)
     const isMp4 =
       res.contentType === 'video/mp4' ||
-      res.playUrl.toLowerCase().includes('.mp4')
+      (!res.playUrl.toLowerCase().includes('.m3u8') &&
+        res.contentType !== 'application/vnd.apple.mpegurl')
     const cookie = res.headers?.Cookie || res.headers?.cookie
     return {
       mediaUrl: res.playUrl,

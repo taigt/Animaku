@@ -8,7 +8,7 @@
   "oldAnimePriority": true,
   "muliSources": true,
   "useWebview": false,
-  "useNativePlayer": true,
+  "useNativePlayer": false,
   "usePost": false,
   "useLegacyParser": false,
   "userAgent": "",

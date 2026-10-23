@@ -419,6 +419,7 @@ export async function resolveTvTFun(
       proxyUrl: isHls
         ? `/api/media/m3u8?url=${encodeURIComponent(directUrl)}`
         : `/api/media/proxy?url=${encodeURIComponent(directUrl)}`,
+      contentType: isHls ? 'application/vnd.apple.mpegurl' : 'video/mp4',
       referer: `${TVTFUN_BASE_URL}/`,
       headers: {
         Referer: `${TVTFUN_BASE_URL}/`,
@@ -499,6 +500,7 @@ export async function resolveTvTFun(
     return {
       playUrl,
       proxyUrl: `/api/media/m3u8?url=${encodeURIComponent(playUrl)}`,
+      contentType: 'application/vnd.apple.mpegurl',
       referer: `${TVTFUN_BASE_URL}/`,
       headers: {
         Referer: `${TVTFUN_BASE_URL}/`,
@@ -510,6 +512,7 @@ export async function resolveTvTFun(
   return {
     playUrl,
     proxyUrl: `/api/media/proxy?url=${encodeURIComponent(playUrl)}`,
+    contentType: 'video/mp4',
     referer: `${TVTFUN_BASE_URL}/`,
     headers: {
       Referer: `${TVTFUN_BASE_URL}/`,

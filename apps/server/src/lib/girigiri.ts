@@ -1,20 +1,17 @@
 /**
  * girigiri愛動漫 (ani.girigirilove.com) dedicated video source adapter.
  *
- * Architecture:
- * - Frontend: MacCMS 传统模板 (ani.girigirilove.com)
- * - Search:
- *   - Fast Suggest JSON API: GET https://ani.girigirilove.com/index.php/ajax/suggest?mid=1&wd={keyword}
- * - Chapters: GET https://ani.girigirilove.com/GV{id}/
- *   - Anthology tabs: 简中 / 繁中 / 日语 等
- * - Play Resolution: GET https://ani.girigirilove.com/playGV{id}-{sid}-{nid}/
- *   - player_aaaa configuration (encrypt: 2, base64 + urlencode)
- *   - Decodes into high-performance Cloudflare CDN HLS direct stream
- * - Media:
- *   - High quality 1080P self-hosted HLS streams on giri.girigirilove.top
- *   - Supports Accept-Ranges, full CORS reflection, zero-proxy direct streaming.
+ * Architecture (2026 重构后架构):
+ * - Frontend: Vite + React SPA (ani.girigirilove.com)
+ * - Backend API: 独立 REST API 服务 (m3u8.girigirilove.com)
+ *   - Search: GET https://m3u8.girigirilove.com/api.php/Vod/get_list?offset=0&limit=24&vod_name={keyword}
+ *     - Fallback Suggest API: GET https://m3u8.girigirilove.com/index.php/ajax/suggest?mid=1&wd={keyword}
+ *   - Detail / Episodes: GET https://m3u8.girigirilove.com/api.php/Vod/get_detail?vod_id={id}
+ *     - 直接下发完整多线路 (vod_play_from) 与直链 M3U8 播放列表 (vod_play_url)
+ * - Media Streams:
+ *   - 高画质 1080P 自建 HLS 直链，部署在 akua.girigirilove.com / ladios.girigirilove.com 等 Cloudflare CDN
+ *   - 全反射 CORS (Access-Control-Allow-Origin: *)，支持 Range 请求，纯客户端直连（requiresProxy: false）
  */
-import * as cheerio from 'cheerio'
 import {
   extractBaseTitle,
   type PluginChapterResult,
@@ -28,6 +25,9 @@ import { config } from '../config'
 import { assertPublicHttpUrl, fetchPublic } from './private-host'
 
 const GIRIGIRI_DEFAULT_BASE_URL = 'https://ani.girigirilove.com'
+// 特殊说明：girigiri 整体重构为 SPA 后，主站 ani.girigirilove.com 所有路径均返回单页静态 HTML。
+// 必须将数据接口请求路由至后端的独立 API 域名 m3u8.girigirilove.com。
+const GIRIGIRI_DEFAULT_API_BASE_URL = 'https://m3u8.girigirilove.com'
 
 export function isGirigiriRule(rule: PluginRule): boolean {
   const name = (rule.name || '').toLowerCase().trim()
@@ -50,13 +50,8 @@ function getBaseUrl(rule?: PluginRule): string {
   return GIRIGIRI_DEFAULT_BASE_URL
 }
 
-function getHtmlHeaders(referer?: string): Record<string, string> {
-  return {
-    'User-Agent': config.defaultUserAgent,
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    ...(referer ? { Referer: referer } : {}),
-  }
+function getApiBaseUrl(): string {
+  return GIRIGIRI_DEFAULT_API_BASE_URL
 }
 
 function getJsonHeaders(referer?: string): Record<string, string> {
@@ -64,7 +59,26 @@ function getJsonHeaders(referer?: string): Record<string, string> {
     'User-Agent': config.defaultUserAgent,
     Accept: 'application/json, text/plain, */*',
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    ...(referer ? { Referer: referer } : {}),
+    ...(referer ? { Referer: referer, Origin: referer.replace(/\/+$/, '') } : {}),
+  }
+}
+
+interface GirigiriGetListResponse {
+  code?: number
+  msg?: string
+  info?: {
+    offset?: number
+    limit?: number
+    total?: number
+    rows?: Array<{
+      vod_id: number | string
+      vod_name: string
+      vod_pic?: string
+      vod_remarks?: string
+      vod_year?: string
+      vod_score?: string
+      vod_blurb?: string
+    }>
   }
 }
 
@@ -80,9 +94,104 @@ interface GirigiriSuggestResponse {
   }>
 }
 
+interface GirigiriDetailResponse {
+  code?: number
+  msg?: string
+  info?: {
+    vod_id?: number | string
+    vod_name?: string
+    vod_play_from?: string
+    vod_play_server?: string
+    vod_play_url?: string
+  }
+}
+
+/**
+ * 格式化 girigiri 的线路代号为用户友好的展示标签
+ */
+export function formatGirigiriRoadName(rawName: string, index: number): string {
+  const trimmed = rawName.trim()
+  const lower = trimmed.toLowerCase()
+  if (lower === 'cht') return '繁体'
+  if (lower === 'chs') return '简体'
+  if (lower === 'db') return '杜比视界'
+  if (lower === '1080p') return '1080P超清'
+  if (lower === '4k') return '4K超清'
+  return trimmed || (index === 0 ? '默认线路' : `线路 ${index + 1}`)
+}
+
+/**
+ * 从页面 URL、详情 URL 或旧版 URL 中解析出 vod_id
+ */
+export function extractVodId(source: string): string | null {
+  const trimmed = source.trim()
+  if (/^\d+$/.test(trimmed)) return trimmed
+  const match = trimmed.match(/(?:detail\/|play\/|GV|vod_id=)(\d+)/i)
+  return match ? match[1] : null
+}
+
+/**
+ * 解析 MacCMS 格式的 vod_play_from 与 vod_play_url
+ */
+export function parseGirigiriRoads(playFrom: string, playUrl: string): Road[] {
+  const fromList = (playFrom || '')
+    .split('$$$')
+    .map((s) => s.trim())
+  const urlGroups = (playUrl || '')
+    .split('$$$')
+    .map((s) => s.trim())
+
+  const roads: Road[] = []
+
+  urlGroups.forEach((group, index) => {
+    if (!group) return
+    const rawFrom = fromList[index] || ''
+    const roadName = formatGirigiriRoadName(rawFrom, index)
+    const urls: string[] = []
+    const identifiers: string[] = []
+
+    const epEntries = group.split('#')
+    for (const ep of epEntries) {
+      const trimmedEp = ep.trim()
+      if (!trimmedEp) continue
+      const dollarIdx = trimmedEp.indexOf('$')
+      let epName = ''
+      let epUrl = ''
+      if (dollarIdx !== -1) {
+        epName = trimmedEp.slice(0, dollarIdx).trim()
+        epUrl = trimmedEp.slice(dollarIdx + 1).trim()
+      } else {
+        epUrl = trimmedEp
+      }
+
+      if (!epUrl || !epUrl.startsWith('http')) continue
+
+      if (/^\d+$/.test(epName)) {
+        epName = `第${epName.padStart(2, '0')}集`
+      } else if (!epName) {
+        epName = `第${String(urls.length + 1).padStart(2, '0')}集`
+      }
+
+      urls.push(epUrl)
+      identifiers.push(epName)
+    }
+
+    if (urls.length > 0) {
+      roads.push({
+        name: roadName,
+        data: urls,
+        identifier: identifiers,
+      })
+    }
+  })
+
+  return roads
+}
+
 /**
  * 1. Search anime by keyword.
- * Primary: ajax suggest JSON API.
+ * Primary: REST API Vod/get_list.
+ * Fallback: MacCMS suggest JSON API on m3u8 API host.
  */
 export async function searchGirigiri(
   rule: PluginRule,
@@ -94,6 +203,7 @@ export async function searchGirigiri(
   }
 
   const baseUrl = getBaseUrl(rule)
+  const apiBase = getApiBaseUrl()
   const diagnostics: string[] = []
   const items: SearchItem[] = []
   const seenUrls = new Set<string>()
@@ -104,26 +214,27 @@ export async function searchGirigiri(
     queriesToTry.push(stripped)
   }
 
+  // 1. 尝试主线 REST API: Vod/get_list
   for (const q of queriesToTry) {
     try {
-      const suggestUrl = `${baseUrl}/index.php/ajax/suggest?mid=1&wd=${encodeURIComponent(q)}`
-      assertPublicHttpUrl(suggestUrl)
+      const searchApiUrl = `${apiBase}/api.php/Vod/get_list?offset=0&limit=24&vod_name=${encodeURIComponent(q)}`
+      assertPublicHttpUrl(searchApiUrl)
 
       const res = await fetchPublic(
-        suggestUrl,
+        searchApiUrl,
         { headers: getJsonHeaders(`${baseUrl}/`) },
         { timeoutMs: 8_000 },
       )
 
       if (res.ok) {
-        const json = (await res.json()) as GirigiriSuggestResponse
-        if (json && Array.isArray(json.list) && json.list.length > 0) {
-          for (const item of json.list) {
-            if (!item.id || !item.name) continue
-            const detailUrl = `${baseUrl}/GV${item.id}/`
+        const json = (await res.json()) as GirigiriGetListResponse
+        if (json && json.code === 1 && json.info && Array.isArray(json.info.rows)) {
+          for (const row of json.info.rows) {
+            if (!row.vod_id || !row.vod_name) continue
+            const detailUrl = `${baseUrl}/detail/${row.vod_id}`
             if (!seenUrls.has(detailUrl)) {
               seenUrls.add(detailUrl)
-              const cleanName = item.name
+              const cleanName = row.vod_name
                 .replace(/&amp;/g, '&')
                 .replace(/&lt;/g, '<')
                 .replace(/&gt;/g, '>')
@@ -140,12 +251,58 @@ export async function searchGirigiri(
           }
         }
       } else {
-        diagnostics.push(`Suggest API 返回非 200 状态码: HTTP ${res.status}`)
+        diagnostics.push(`get_list API 返回非 200 状态码: HTTP ${res.status}`)
       }
     } catch (err) {
       diagnostics.push(
-        `Suggest API 搜索异常: ${err instanceof Error ? err.message : String(err)}`,
+        `get_list API 搜索异常: ${err instanceof Error ? err.message : String(err)}`,
       )
+    }
+  }
+
+  // 2. 若 get_list 未搜到结果，回退至 m3u8 域名的 suggest API
+  if (items.length === 0) {
+    for (const q of queriesToTry) {
+      try {
+        const suggestUrl = `${apiBase}/index.php/ajax/suggest?mid=1&wd=${encodeURIComponent(q)}`
+        assertPublicHttpUrl(suggestUrl)
+
+        const res = await fetchPublic(
+          suggestUrl,
+          { headers: getJsonHeaders(`${baseUrl}/`) },
+          { timeoutMs: 8_000 },
+        )
+
+        if (res.ok) {
+          const json = (await res.json()) as GirigiriSuggestResponse
+          if (json && Array.isArray(json.list) && json.list.length > 0) {
+            for (const item of json.list) {
+              if (!item.id || !item.name) continue
+              const detailUrl = `${baseUrl}/detail/${item.id}`
+              if (!seenUrls.has(detailUrl)) {
+                seenUrls.add(detailUrl)
+                const cleanName = item.name
+                  .replace(/&amp;/g, '&')
+                  .replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>')
+                  .replace(/&quot;/g, '"')
+                  .trim()
+                items.push({
+                  name: cleanName,
+                  src: detailUrl,
+                })
+              }
+            }
+            if (items.length > 0) {
+              break
+            }
+          }
+        }
+      } catch (err) {
+        diagnostics.push(
+          `suggest 回退 API 异常: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
     }
   }
 
@@ -158,118 +315,43 @@ export async function searchGirigiri(
 
 /**
  * 2. Get chapter and multi-source road lists for an anime.
+ * Uses REST API Vod/get_detail to directly fetch video stream playlists.
  */
 export async function chaptersGirigiri(
   rule: PluginRule,
   source: string,
 ): Promise<PluginChapterResult> {
-  const baseUrl = getBaseUrl(rule)
-  let detailUrl = source.trim()
-  if (!detailUrl.startsWith('http')) {
-    detailUrl = `${baseUrl}${detailUrl.startsWith('/') ? '' : '/'}${detailUrl}`
+  const vodId = extractVodId(source)
+  if (!vodId) {
+    throw new Error(`无法从输入来源解析 girigiri 番剧 ID: ${source}`)
   }
-  assertPublicHttpUrl(detailUrl)
+
+  const baseUrl = getBaseUrl(rule)
+  const apiBase = getApiBaseUrl()
+  const detailApiUrl = `${apiBase}/api.php/Vod/get_detail?vod_id=${vodId}&user_id=`
+  assertPublicHttpUrl(detailApiUrl)
 
   const res = await fetchPublic(
-    detailUrl,
-    { headers: getHtmlHeaders(`${baseUrl}/`) },
+    detailApiUrl,
+    { headers: getJsonHeaders(`${baseUrl}/`) },
     { timeoutMs: 10_000 },
   )
 
   if (!res.ok) {
-    throw new Error(`girigiri 获取番剧详情失败 (HTTP ${res.status})`)
+    throw new Error(`girigiri 获取番剧详情接口失败 (HTTP ${res.status})`)
   }
 
-  const html = await res.text()
-  const $ = cheerio.load(html)
-
-  // 1. Extract Tab Labels (e.g. 简中, 繁中)
-  const tabLabels: string[] = []
-  $('.anthology-tab a, .anthology-tab .swiper-slide').each((_, el) => {
-    const text = $(el)
-      .text()
-      .replace(/\s+/g, ' ')
-      .replace(/\d+$/, '')
-      .trim()
-    if (text) {
-      tabLabels.push(text)
-    }
-  })
-
-  // 2. Extract Playlists
-  const roads: Road[] = []
-  // dsn2 模板同时包含移动端与桌面端同内容容器，优先取主容器并互斥回退，防止逗号选择器导致同组线路重复翻倍
-  let playBoxes = $('.anthology-list-play')
-  if (playBoxes.length === 0) {
-    playBoxes = $('.anthology-list-box')
+  const json = (await res.json()) as GirigiriDetailResponse
+  if (!json || json.code !== 1 || !json.info) {
+    throw new Error(
+      `girigiri 番剧详情接口返回异常: ${json?.msg || '未知错误 (code != 1)'}`,
+    )
   }
 
-  if (playBoxes.length > 0) {
-    playBoxes.each((boxIndex, box) => {
-      const $box = $(box)
-      const urls: string[] = []
-      const identifiers: string[] = []
+  const playFrom = json.info.vod_play_from || ''
+  const playUrl = json.info.vod_play_url || ''
 
-      $box.find('a[href*="playGV"]').each((__, a) => {
-        const href = $(a).attr('href') || ''
-        let name = $(a).text().trim()
-        if (href && !href.startsWith('javascript:') && name) {
-          const absEpUrl = href.startsWith('http') ? href : `${baseUrl}${href.startsWith('/') ? '' : '/'}${href}`
-          if (/^\d+$/.test(name)) {
-            name = `第${name.padStart(2, '0')}集`
-          } else if (!name || /^\d+p$/i.test(name)) {
-            const nidMatch = href.match(/playGV\d+-\d+-(\d+)/)
-            const nid = nidMatch ? nidMatch[1] : '1'
-            name = `第${nid.padStart(2, '0')}集${name ? ` (${name})` : ''}`
-          }
-          urls.push(absEpUrl)
-          identifiers.push(name)
-        }
-      })
-
-      if (urls.length > 0) {
-        const roadName = tabLabels[boxIndex] || (boxIndex === 0 ? '默认线路' : `线路 ${boxIndex + 1}`)
-        roads.push({
-          name: roadName,
-          data: urls,
-          identifier: identifiers,
-        })
-      }
-    })
-  }
-
-  // Fallback: extract all playGV links directly
-  if (roads.length === 0) {
-    const urls: string[] = []
-    const identifiers: string[] = []
-    $('a[href*="playGV"]').each((_, a) => {
-      const href = $(a).attr('href') || ''
-      let name = $(a).text().trim()
-      if (href && !href.startsWith('javascript:') && name && name.length < 30) {
-        const absEpUrl = href.startsWith('http') ? href : `${baseUrl}${href.startsWith('/') ? '' : '/'}${href}`
-        if (!urls.includes(absEpUrl)) {
-          if (/^\d+$/.test(name)) {
-            name = `第${name.padStart(2, '0')}集`
-          } else if (!name || /^\d+p$/i.test(name)) {
-            const nidMatch = href.match(/playGV\d+-\d+-(\d+)/)
-            const nid = nidMatch ? nidMatch[1] : '1'
-            name = `第${nid.padStart(2, '0')}集${name ? ` (${name})` : ''}`
-          }
-          urls.push(absEpUrl)
-          identifiers.push(name)
-        }
-      }
-    })
-
-    if (urls.length > 0) {
-      roads.push({
-        name: '默认线路',
-        data: urls,
-        identifier: identifiers,
-      })
-    }
-  }
-
+  const roads = parseGirigiriRoads(playFrom, playUrl)
   if (roads.length === 0) {
     return {
       pluginName: rule.name,
@@ -284,121 +366,77 @@ export async function chaptersGirigiri(
   }
 }
 
-interface MacPlayerConfig {
-  flag?: string
-  encrypt?: number
-  url?: string
-  url_next?: string
-  from?: string
-  id?: string | number
-  sid?: number
-  nid?: number
-}
-
-/**
- * Decode MacCMS player_aaaa encoded URL.
- * Supports encrypt 0 (plain), 1 (unescape), 2 (base64 + unescape).
- */
-function decodePlayerUrl(rawUrl: string, encryptMode?: number): string {
-  let url = rawUrl.trim()
-  if (!url) return ''
-
-  // Split external subtitle attachments if present (e.g. url.m3u8*chs^...)
-  if (url.includes('*')) {
-    url = url.split('*')[0].trim()
-  }
-
-  const mode = Number(encryptMode ?? 0)
-  if (mode === 1) {
-    try {
-      url = unescape(url)
-    } catch {
-      /* ignore */
-    }
-  } else if (mode === 2) {
-    try {
-      const b64 = Buffer.from(url, 'base64').toString('utf8')
-      try {
-        url = unescape(b64)
-      } catch {
-        url = b64
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-
-  return url
-}
-
 /**
  * 3. Resolve direct playback URL for an episode.
- * Decodes player_aaaa into high quality Cloudflare HLS direct stream.
+ * 特殊处理说明：新版 get_detail 接口直接下发 akua/ladios 的 m3u8 直链。
+ * 当 pageUrl 已经是直链流时直接零网络往返透传；若为页面 URL 则回退调用 get_detail 获取直链。
+ * akua/ladios 直链为全反射 CORS 并支持 Range，设置 requiresProxy: false 直连播放。
  */
 export async function resolveGirigiri(
   rule: PluginRule,
   pageUrl: string,
 ): Promise<ResolvePlayResult> {
-  const baseUrl = getBaseUrl(rule)
-  const absPlayUrl = pageUrl.startsWith('http')
-    ? pageUrl
-    : `${baseUrl}${pageUrl.startsWith('/') ? '' : '/'}${pageUrl}`
-  assertPublicHttpUrl(absPlayUrl)
+  let playUrl = pageUrl.trim()
 
-  const res = await fetchPublic(
-    absPlayUrl,
-    { headers: getHtmlHeaders(`${baseUrl}/`) },
-    { timeoutMs: 10_000 },
-  )
+  // 1. 若已经是媒体流直链，直接透传返回
+  if (playUrl.includes('.m3u8') || playUrl.includes('.mp4')) {
+    const isHls = playUrl.includes('.m3u8')
+    const proxyUrl = isHls
+      ? `/api/media/m3u8?url=${encodeURIComponent(playUrl)}`
+      : `/api/media/proxy?url=${encodeURIComponent(playUrl)}`
 
-  if (!res.ok) {
-    throw new Error(`girigiri 获取播放页失败 (HTTP ${res.status})`)
-  }
-
-  const html = await res.text()
-
-  // 1. Extract player_aaaa configuration
-  let playerUrl = ''
-  let encryptMode = 0
-  const pMatch = html.match(/player_aaaa\s*=\s*(\{[\s\S]*?\})\s*<\/script>/)
-  if (pMatch) {
-    try {
-      const pConfig = JSON.parse(pMatch[1]) as MacPlayerConfig
-      playerUrl = (pConfig.url || '').trim()
-      encryptMode = Number(pConfig.encrypt ?? 0)
-    } catch {
-      /* ignore JSON parse error */
+    return {
+      playUrl,
+      proxyUrl,
+      requiresProxy: false,
+      format: isHls ? 'hls' : 'mp4',
+      headers: {
+        'User-Agent': config.defaultUserAgent,
+      },
     }
   }
 
-  if (!playerUrl) {
-    const rawUrlMatch = html.match(/player_aaaa\s*=\s*\{[\s\S]*?["']url["']\s*:\s*["']([^"']+)["']/i)
-    if (rawUrlMatch) {
-      playerUrl = rawUrlMatch[1].trim()
-    }
-    const rawEncMatch = html.match(/player_aaaa\s*=\s*\{[\s\S]*?["']encrypt["']\s*:\s*([0-9]+)/i)
-    if (rawEncMatch) {
-      encryptMode = Number(rawEncMatch[1])
-    }
+  // 2. 页面 URL 回退处理（支持 /play/:id?sourceIndex=0&episodeIndex=0 或 /detail/:id）
+  const vodId = extractVodId(playUrl)
+  if (!vodId) {
+    throw new Error(`无法从播放页地址提取 girigiri ID: ${pageUrl}`)
   }
 
-  if (!playerUrl) {
-    throw new Error('未在 girigiri 播放页找到 player_aaaa 播放参数')
+  const chapterRes = await chaptersGirigiri(rule, vodId)
+  if (!chapterRes.roads || chapterRes.roads.length === 0) {
+    throw new Error(`girigiri 解析播放源失败: 未获取到可用分集`)
   }
 
-  // 2. Decode playback URL
-  const decodedMediaUrl = decodePlayerUrl(playerUrl, encryptMode)
-  if (!decodedMediaUrl.startsWith('http')) {
-    throw new Error(`girigiri 解码直链格式异常: ${decodedMediaUrl}`)
+  let sourceIdx = 0
+  let episodeIdx = 0
+
+  try {
+    const parsed = new URL(playUrl.startsWith('http') ? playUrl : `https://ani.girigirilove.com/${playUrl}`)
+    const sParam = parsed.searchParams.get('sourceIndex')
+    const eParam = parsed.searchParams.get('episodeIndex')
+    if (sParam !== null) sourceIdx = parseInt(sParam, 10) || 0
+    if (eParam !== null) episodeIdx = parseInt(eParam, 10) || 0
+  } catch {
+    /* ignore URL parse error */
   }
 
-  const isHls = decodedMediaUrl.includes('.m3u8')
+  const road = chapterRes.roads[sourceIdx] || chapterRes.roads[0]
+  if (!road || !road.data || road.data.length === 0) {
+    throw new Error(`girigiri 未找到指定线路的分集直链`)
+  }
+
+  const resolvedDirectUrl = road.data[episodeIdx] || road.data[0]
+  if (!resolvedDirectUrl || !resolvedDirectUrl.startsWith('http')) {
+    throw new Error(`girigiri 解析到的直链格式异常: ${resolvedDirectUrl}`)
+  }
+
+  const isHls = resolvedDirectUrl.includes('.m3u8')
   const proxyUrl = isHls
-    ? `/api/media/m3u8?url=${encodeURIComponent(decodedMediaUrl)}`
-    : `/api/media/proxy?url=${encodeURIComponent(decodedMediaUrl)}`
+    ? `/api/media/m3u8?url=${encodeURIComponent(resolvedDirectUrl)}`
+    : `/api/media/proxy?url=${encodeURIComponent(resolvedDirectUrl)}`
 
   return {
-    playUrl: decodedMediaUrl,
+    playUrl: resolvedDirectUrl,
     proxyUrl,
     requiresProxy: false,
     format: isHls ? 'hls' : 'mp4',

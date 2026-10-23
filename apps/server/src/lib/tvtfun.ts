@@ -1,14 +1,12 @@
 /**
  * tvtfun.net (TvTFun 番剧网) dedicated adapter.
  *
- * Architecture:
- * - Frontend: Next.js (App Router / RSC) with anti-debugging / F12 redirect protection
- * - Search API: GET https://www.tvtfun.net/api/videos/search?q={keyword}
- * - Video Detail API: GET https://www.tvtfun.net/api/videos/{video_id}
- * - Play Resolution: GET https://www.tvtfun.net/api/videos/resolve-play-url?episodeId={episode_id}
- *   - Requires fresh one-time `Cookie: tvt-pt=...` (issued per play session)
- *   - Requires `X-Play-Ctx: base64({ f: 60, v: 1, w: 1920, hgt: 1080, p: 1 })`
- * - Media: High quality 1080P MP4 direct streams / HLS (supports Accept-Ranges byte-level seek)
+ * Architecture (Nuxt 3 API migration):
+ * - Search API: GET https://www.tvtfun.net/api/client/anime?keyword={keyword}&page=1&pageSize=20
+ * - Detail & Episodes: GET https://www.tvtfun.net/api/client/anime/{identifier}
+ * - Direct Play Resolution: POST https://www.tvtfun.net/api/site-auth/playback-resolve
+ *   - Body: { episodeId, sourceId }
+ *   - Directly returns BytePlus / Akamai high-speed MP4 / HLS streams without legacy cookies or X-Play-Ctx
  */
 import {
   extractBaseTitle,
@@ -45,94 +43,79 @@ function getBaseHeaders(referer?: string): Record<string, string> {
   }
 }
 
-/**
- * Obtain a fresh one-time `tvt-pt` cookie for resolving an episode.
- * TvTFun backend consumes and invalidates tvt-pt on each resolve call (one-time nonce).
- */
-async function fetchFreshPlayCookie(
-  slug: string,
-  sourceIndex = 0,
-  epSort = 0,
-): Promise<string> {
-  const targetUrl = `${TVTFUN_BASE_URL}/video/${slug}/play?source=${sourceIndex}&episode=${epSort}`
-  assertPublicHttpUrl(targetUrl)
-
-  const res = await fetchPublic(
-    targetUrl,
-    {
-      headers: {
-        'User-Agent': config.defaultUserAgent,
-        Accept:
-          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-      },
-    },
-    { timeoutMs: 8_000 },
-  )
-
-  // Fully consume HTML stream
-  await res.text().catch(() => '')
-
-  const rawSetCookies =
-    res.headers.getSetCookie?.() || [res.headers.get('set-cookie') || '']
-  const cookieEntries = rawSetCookies
-    .flatMap((c) => c.split(','))
-    .map((c) => c.trim().split(';')[0])
-    .filter((c) => c.startsWith('tvt-pt='))
-
-  const ptCookie = cookieEntries[0]
-  if (ptCookie) {
-    return ptCookie
-  }
-
-  throw new Error('未能从 TvTFun 获取播放凭证 (tvt-pt cookie)')
-}
-
 interface TvTFunSearchResponse {
+  code?: number
   data?: {
-    videos?: Array<{
+    total?: number
+    items?: Array<{
       id: string
-      name: string
+      name?: string
+      originalName?: string
       slug?: string
-      bgmId?: number | string | null
-      pic?: string | null
-      picThumb?: string | null
-      remarks?: string | null
+      bangumiId?: number | string | null
+      posterUrl?: string | null
+      coverUrl?: string | null
     }>
   }
+  message?: string
   error?: string
 }
 
 interface TvTFunDetailResponse {
+  code?: number
   data?: {
     id: string
     name: string
     slug?: string
-    bgmId?: number | string | null
-    playSources?: Array<{
-      id: string
-      name: string
-      fromCode?: string
-      sort?: number
+    bangumiId?: number | string | null
+    seasons?: Array<{
+      id?: string
+      seasonNo?: number
+      name?: string
       episodes?: Array<{
         id: string
-        name: string
-        sort: number
-        url?: string
+        number: number
+        title?: string
+        watchPath?: string
+        sources?: Array<{
+          id: string
+          name?: string
+          lineName?: string
+          playbackLineId?: string
+          sortOrder?: number
+          playback?: {
+            kind?: string
+            engine?: string
+            url?: string | null
+            mediaType?: string
+            requiresResolve?: boolean
+          }
+        }>
       }>
     }>
   }
+  message?: string
   error?: string
 }
 
 interface TvTFunResolveResponse {
+  code?: number
   data?: {
-    url: string
-    type?: 'mp4' | 'm3u8' | 'unavailable' | 'original'
-    headers?: Record<string, string>
-    source?: string
-    fallback?: unknown
+    sourceId?: string
+    playback?: {
+      kind?: string
+      engine?: string
+      url?: string
+      mediaType?: string
+      requiresResolve?: boolean
+    }
+    subtitles?: Array<{
+      id?: string
+      format?: string
+      url?: string
+    }>
   }
+  message?: string
   error?: string
 }
 
@@ -158,14 +141,14 @@ export async function searchTvTFun(
   const seenIds = new Set<string>()
 
   for (const q of queriesToTry) {
-    const searchUrl = `${TVTFUN_BASE_URL}/api/videos/search?q=${encodeURIComponent(q)}`
+    const searchUrl = `${TVTFUN_BASE_URL}/api/client/anime?keyword=${encodeURIComponent(q)}&page=1&pageSize=20`
     assertPublicHttpUrl(searchUrl)
 
     try {
       const res = await fetchPublic(
         searchUrl,
         {
-          headers: getBaseHeaders(`${TVTFUN_BASE_URL}/videos`),
+          headers: getBaseHeaders(`${TVTFUN_BASE_URL}/`),
         },
         { timeoutMs: 10_000 },
       )
@@ -173,17 +156,20 @@ export async function searchTvTFun(
       if (!res.ok) continue
 
       const json = (await res.json()) as TvTFunSearchResponse
-      if (json.error) continue
+      if (json.error || json.code !== 0) continue
 
-      const rawVideos = json?.data?.videos || []
+      const rawVideos = json?.data?.items || []
       for (const v of rawVideos) {
-        if (!v.id || !v.name || seenIds.has(v.id)) continue
+        if (!v.id || seenIds.has(v.id)) continue
+        const name = (v.name || v.originalName || '').trim()
+        if (!name) continue
+
         seenIds.add(v.id)
         const slug = v.slug || v.id
         videoIdToSlugMap.set(v.id, slug)
         items.push({
-          name: v.name.trim(),
-          src: `${TVTFUN_BASE_URL}/video/${v.id}?slug=${encodeURIComponent(slug)}`,
+          name,
+          src: `${TVTFUN_BASE_URL}/anime/${slug}`,
         })
       }
 
@@ -202,52 +188,66 @@ export async function searchTvTFun(
 }
 
 /**
- * 2. Parse video chapters and playback roads.
- */
-/**
  * 线路优先级排序权重：
- * TvTFun 线路 D (source-2) 解析为国内优化直连 M3U8，稳定性与速度远超海外 TikTok CDN (线路 A)；
- * 优先提升线路 D 至首位作为默认起播线路。
+ * 线路 1 / AGE 指向字节跳动 BytePlus / Akamai CDN 全球直连节点，全球无地域限制且带宽高；
+ * 赋予最高优先级 100 置顶。
  */
-function getTvTFunSourcePriority(src: { name?: string; fromCode?: string }): number {
-  const name = (src.name || '').trim()
-  if (/线路\s*D\b/i.test(name) || name.includes('线路D')) return 100
-  if (/线路\s*B\b/i.test(name) || name.includes('线路B')) return 80
-  if (/线路\s*C\b/i.test(name) || name.includes('线路C')) return 70
-  if (/线路\s*A\b/i.test(name) || name.includes('线路A')) return 60
+function getTvTFunSourcePriority(lineName = '', srcName = ''): number {
+  const combined = `${lineName} ${srcName}`.toLowerCase()
+  if (
+    combined.includes('age') ||
+    combined.includes('线路1') ||
+    combined.includes('线路a') ||
+    combined.includes('官方')
+  ) {
+    return 100
+  }
+  if (
+    combined.includes('线路2') ||
+    combined.includes('线路b') ||
+    combined.includes('dytt')
+  ) {
+    return 80
+  }
+  if (combined.includes('线路3') || combined.includes('线路c')) return 70
+  if (combined.includes('线路4') || combined.includes('线路d')) return 60
   return 50
 }
 
+/**
+ * 2. Parse video chapters and playback roads.
+ */
 export async function chaptersTvTFun(
   rule: PluginRule,
   source: string,
 ): Promise<PluginChapterResult> {
-  let videoId = ''
-  let slug = ''
+  let identifier = ''
 
   try {
     const u = new URL(source)
-    const match = u.pathname.match(/\/video\/([^/?#]+)/)
+    const match = u.pathname.match(/\/(?:anime|video)\/([^/?#]+)/)
     if (match) {
-      videoId = match[1]
+      identifier = match[1]
     }
-    slug = u.searchParams.get('slug') || videoId
+    const querySlug = u.searchParams.get('slug')
+    if (querySlug) {
+      identifier = querySlug
+    }
   } catch {
-    videoId = source.replace(/.*\/video\//, '').split(/[?#]/)[0]
-    slug = videoId
+    identifier = source.replace(/.*\/(?:anime|video)\//, '').split(/[?#]/)[0]
   }
 
-  if (!videoId) {
-    throw new Error(`无法从链接提取 TvTFun 视频 ID: ${source}`)
+  if (!identifier) {
+    throw new Error(`无法从链接提取 TvTFun 标识: ${source}`)
   }
 
-  const detailUrl = `${TVTFUN_BASE_URL}/api/videos/${videoId}`
+  const detailUrl = `${TVTFUN_BASE_URL}/api/client/anime/${identifier}`
   assertPublicHttpUrl(detailUrl)
 
   const res = await fetchPublic(
     detailUrl,
     {
-      headers: getBaseHeaders(`${TVTFUN_BASE_URL}/video/${slug}`),
+      headers: getBaseHeaders(`${TVTFUN_BASE_URL}/anime/${identifier}`),
     },
     { timeoutMs: 10_000 },
   )
@@ -257,12 +257,13 @@ export async function chaptersTvTFun(
   }
 
   const json = (await res.json()) as TvTFunDetailResponse
-  if (json.error) {
-    throw new Error(`TvTFun 获取番剧报错: ${json.error}`)
+  if (json.error || json.code !== 0) {
+    throw new Error(`TvTFun 获取番剧报错: ${json.error || json.message}`)
   }
 
   const data = json.data
-  if (!data || !Array.isArray(data.playSources) || data.playSources.length === 0) {
+  const seasons = data?.seasons || []
+  if (!data || seasons.length === 0) {
     return {
       pluginName: rule.name,
       roads: [],
@@ -270,55 +271,102 @@ export async function chaptersTvTFun(
     }
   }
 
-  const effectiveSlug = data.slug || slug || videoId
-  videoIdToSlugMap.set(videoId, effectiveSlug)
+  const effectiveSlug = data.slug || identifier
+  videoIdToSlugMap.set(data.id, effectiveSlug)
   if (data.slug) {
     videoIdToSlugMap.set(data.slug, data.slug)
   }
 
-  // 按照线路优先级排序，优先将国内直连稳定的线路 D 排在首位
-  // 同时保留原始 source 索引以确保 fetchFreshPlayCookie 与 Referer 鉴权完全匹配
-  const indexedSources = data.playSources.map((src, originalIdx) => ({
-    src,
-    originalIdx,
-  }))
+  // 聚合所有分集（多季按顺序展平）
+  const allEpisodes: NonNullable<NonNullable<typeof data.seasons>[number]['episodes']> = []
+  for (const s of seasons) {
+    if (Array.isArray(s.episodes)) {
+      allEpisodes.push(...s.episodes)
+    }
+  }
 
-  indexedSources.sort((a, b) => {
-    const pA = getTvTFunSourcePriority(a.src)
-    const pB = getTvTFunSourcePriority(b.src)
-    if (pA !== pB) return pB - pA
-    return a.originalIdx - b.originalIdx
+  if (allEpisodes.length === 0) {
+    return {
+      pluginName: rule.name,
+      roads: [],
+      diagnostics: ['未解析到有效分集列表'],
+    }
+  }
+
+  allEpisodes.sort((a, b) => (a.number ?? 0) - (b.number ?? 0))
+
+  // 特殊处理说明：
+  // TvTFun Nuxt 3 接口在每个分集下挂载一组播放线路 sources（例如线路 1 为 AGE/BytePlus 全球高速 CDN，线路 2 为切片备用源）。
+  // 将各分集按照 lineName/name 聚类归纳为 Road，并置顶 BytePlus/Akamai 节点。
+  const lineMeta = new Map<
+    string,
+    { name: string; srcName: string; priority: number; order: number }
+  >()
+  const lineEpisodes = new Map<
+    string,
+    { urls: string[]; identifiers: string[] }
+  >()
+
+  for (const ep of allEpisodes) {
+    const epId = ep.id
+    const epNum = ep.number ?? 1
+    const epTitle = (ep.title || '').trim()
+    const epName = epTitle
+      ? /^\d+$/.test(epTitle)
+        ? `第 ${epTitle} 话`
+        : epTitle
+      : `第 ${epNum} 话`
+
+    const sources = ep.sources || []
+    for (let sIdx = 0; sIdx < sources.length; sIdx++) {
+      const src = sources[sIdx]
+      if (!src || !src.id) continue
+
+      const lineKey =
+        src.playbackLineId || src.lineName || src.name || `line_${sIdx}`
+      const lineName = (src.lineName || `线路 ${sIdx + 1}`).trim()
+      const srcName = (src.name || '').trim()
+      const playback = src.playback || {}
+      const requiresResolve = playback.requiresResolve !== false
+      const directUrl = playback.url || ''
+      const mediaType = playback.mediaType || 'mp4'
+
+      if (!lineMeta.has(lineKey)) {
+        lineMeta.set(lineKey, {
+          name: lineName,
+          srcName,
+          priority: getTvTFunSourcePriority(lineName, srcName),
+          order: src.sortOrder ?? sIdx,
+        })
+        lineEpisodes.set(lineKey, { urls: [], identifiers: [] })
+      }
+
+      const epUrl = `${TVTFUN_BASE_URL}/watch/${effectiveSlug}/${epNum}?episodeId=${encodeURIComponent(epId)}&sourceId=${encodeURIComponent(src.id)}&requiresResolve=${requiresResolve}&mediaType=${encodeURIComponent(mediaType)}&url=${encodeURIComponent(directUrl)}`
+
+      const container = lineEpisodes.get(lineKey)!
+      container.urls.push(epUrl)
+      container.identifiers.push(epName)
+    }
+  }
+
+  const sortedKeys = Array.from(lineMeta.keys()).sort((a, b) => {
+    const mA = lineMeta.get(a)!
+    const mB = lineMeta.get(b)!
+    if (mA.priority !== mB.priority) {
+      return mB.priority - mA.priority
+    }
+    return mA.order - mB.order
   })
 
   const roads: Road[] = []
-
-  for (let i = 0; i < indexedSources.length; i++) {
-    const { src, originalIdx } = indexedSources[i]
-    const episodes = src.episodes || []
-    if (episodes.length === 0) continue
-
-    const sortedEpisodes = [...episodes].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
-    const roadName =
-      (src.name || '').replace(/\s*\([^()]+\)\s*$/, '').trim() ||
-      src.fromCode ||
-      `线路 ${String.fromCharCode(65 + i)}`
-
-    const urls: string[] = []
-    const identifiers: string[] = []
-
-    for (const ep of sortedEpisodes) {
-      if (!ep.id) continue
-      urls.push(
-        `${TVTFUN_BASE_URL}/video/${effectiveSlug}/play?episodeId=${ep.id}&videoId=${videoId}&source=${originalIdx}&epSort=${ep.sort ?? 0}`,
-      )
-      identifiers.push(ep.name || `第 ${ep.sort + 1} 话`)
-    }
-
-    if (urls.length > 0) {
+  for (const key of sortedKeys) {
+    const meta = lineMeta.get(key)!
+    const eps = lineEpisodes.get(key)!
+    if (eps.urls.length > 0) {
       roads.push({
-        name: roadName,
-        data: urls,
-        identifier: identifiers,
+        name: meta.name,
+        data: eps.urls,
+        identifier: eps.identifiers,
       })
     }
   }
@@ -337,16 +385,21 @@ export async function resolveTvTFun(
   pageUrl: string,
 ): Promise<ResolvePlayResult> {
   let episodeId = ''
-  let slug = '547888'
-  let sourceIndex = 0
-  let epSort = 0
+  let sourceId = ''
+  let slug = ''
+  let requiresResolve = true
+  let directUrl = ''
+  let mediaType = 'mp4'
 
   try {
     const u = new URL(pageUrl)
     episodeId = u.searchParams.get('episodeId') || ''
-    sourceIndex = Number(u.searchParams.get('source') || '0')
-    epSort = Number(u.searchParams.get('epSort') || '0')
-    const match = u.pathname.match(/\/video\/([^/?#]+)/)
+    sourceId = u.searchParams.get('sourceId') || ''
+    requiresResolve = u.searchParams.get('requiresResolve') !== 'false'
+    directUrl = u.searchParams.get('url') || ''
+    mediaType = u.searchParams.get('mediaType') || 'mp4'
+
+    const match = u.pathname.match(/\/(?:watch|anime|video)\/([^/?#]+)/)
     if (match) {
       slug = match[1]
     }
@@ -358,27 +411,39 @@ export async function resolveTvTFun(
     /* fallback parsing */
   }
 
-  // Gracefully resolve episodeId from detail API if given a raw video URL without query params
-  if (!episodeId) {
-    const fallbackVideoId = slug
+  // 1. 若分集已带免解析直链，直接返回
+  if (!requiresResolve && directUrl) {
+    const isHls = mediaType === 'hls' || /\.m3u8(\?|$)/i.test(directUrl)
+    return {
+      playUrl: directUrl,
+      proxyUrl: isHls
+        ? `/api/media/m3u8?url=${encodeURIComponent(directUrl)}`
+        : `/api/media/proxy?url=${encodeURIComponent(directUrl)}`,
+      referer: `${TVTFUN_BASE_URL}/`,
+      headers: {
+        Referer: `${TVTFUN_BASE_URL}/`,
+        'User-Agent': config.defaultUserAgent,
+      },
+    }
+  }
+
+  // 2. 若缺少 episodeId/sourceId，兜底从番剧详情提取首集第一条线路
+  if (!episodeId || !sourceId) {
+    const fallbackId = slug || '513878'
     try {
-      const detailUrl = `${TVTFUN_BASE_URL}/api/videos/${fallbackVideoId}`
+      const detailUrl = `${TVTFUN_BASE_URL}/api/client/anime/${fallbackId}`
       assertPublicHttpUrl(detailUrl)
       const dRes = await fetchPublic(
         detailUrl,
-        { headers: getBaseHeaders(`${TVTFUN_BASE_URL}/video/${fallbackVideoId}`) },
+        { headers: getBaseHeaders(`${TVTFUN_BASE_URL}/anime/${fallbackId}`) },
         { timeoutMs: 6_000 },
       )
       if (dRes.ok) {
         const dJson = (await dRes.json()) as TvTFunDetailResponse
-        const firstEp = dJson?.data?.playSources?.[sourceIndex]?.episodes?.[epSort] ||
-          dJson?.data?.playSources?.[0]?.episodes?.[0]
-        if (firstEp?.id) {
+        const firstEp = dJson?.data?.seasons?.[0]?.episodes?.[0]
+        if (firstEp) {
           episodeId = firstEp.id
-          if (dJson.data?.slug) {
-            slug = dJson.data.slug
-            videoIdToSlugMap.set(fallbackVideoId, slug)
-          }
+          sourceId = firstEp.sources?.[0]?.id || ''
         }
       }
     } catch {
@@ -386,99 +451,69 @@ export async function resolveTvTFun(
     }
   }
 
-  if (!episodeId) {
-    throw new Error(`TvTFun 缺少 episodeId 参数: ${pageUrl}`)
+  if (!episodeId || !sourceId) {
+    throw new Error(`TvTFun 缺少解析参数: ${pageUrl}`)
   }
 
-  const effectiveSlug = videoIdToSlugMap.get(slug) || slug
-  const playPageReferer = `${TVTFUN_BASE_URL}/video/${effectiveSlug}/play?source=${sourceIndex}&episode=${epSort}`
+  const resolveUrl = `${TVTFUN_BASE_URL}/api/site-auth/playback-resolve`
+  assertPublicHttpUrl(resolveUrl)
 
-  const doResolve = async (): Promise<ResolvePlayResult> => {
-    // Obtain a fresh one-time play cookie specifically for this episode
-    const cookie = await fetchFreshPlayCookie(effectiveSlug, sourceIndex, epSort)
-
-    const apiUrl = `${TVTFUN_BASE_URL}/api/videos/resolve-play-url?episodeId=${encodeURIComponent(episodeId)}`
-    assertPublicHttpUrl(apiUrl)
-
-    const ctx = Buffer.from(
-      JSON.stringify({ f: 60, v: 1, w: 1920, hgt: 1080, p: 1 }),
-    ).toString('base64')
-
-    const res = await fetchPublic(
-      apiUrl,
-      {
-        headers: {
-          'User-Agent': config.defaultUserAgent,
-          Cookie: cookie,
-          'X-Play-Ctx': ctx,
-          Referer: playPageReferer,
-          Accept: 'application/json, text/plain, */*',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        },
+  const res = await fetchPublic(
+    resolveUrl,
+    {
+      method: 'POST',
+      headers: {
+        'User-Agent': config.defaultUserAgent,
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/plain, */*',
+        Referer: pageUrl,
       },
-      { timeoutMs: 10_000 },
-    )
+      body: JSON.stringify({
+        episodeId,
+        sourceId,
+      }),
+    },
+    { timeoutMs: 12_000 },
+  )
 
-    if (res.status === 403 || res.status === 401) {
-      throw new Error(`403_CREDENTIAL_EXPIRED`)
-    }
+  if (!res.ok) {
+    throw new Error(`TvTFun 解析接口异常 (HTTP ${res.status})`)
+  }
 
-    if (!res.ok) {
-      throw new Error(`TvTFun 解析接口异常 (HTTP ${res.status})`)
-    }
+  const json = (await res.json()) as TvTFunResolveResponse
+  if (json.error || json.code !== 0) {
+    throw new Error(`TvTFun 解析报错: ${json.error || json.message}`)
+  }
 
-    const json = (await res.json()) as TvTFunResolveResponse
-    if (json.error) {
-      if (json.error.includes('凭证') || json.error.includes('无效')) {
-        throw new Error(`403_CREDENTIAL_EXPIRED`)
-      }
-      throw new Error(`TvTFun 解析报错: ${json.error}`)
-    }
+  const playData = json.data?.playback
+  const playUrl = playData?.url?.trim() || ''
+  const playMediaType = playData?.mediaType?.toLowerCase() || mediaType
 
-    const playData = json.data
-    if (!playData || !playData.url || playData.type === 'unavailable') {
-      throw new Error('TvTFun 该剧集播放源暂时不可用或尚未就绪')
-    }
+  if (!playUrl) {
+    throw new Error('TvTFun 该剧集播放源暂时不可用或尚未就绪')
+  }
 
-    const directUrl = playData.url.trim()
-    const isHls =
-      playData.type === 'm3u8' || /\.m3u8(\?|$)/i.test(directUrl)
+  const isHls = playMediaType === 'hls' || /\.m3u8(\?|$)/i.test(playUrl)
 
-    if (isHls) {
-      let proxyUrl = `/api/media/m3u8?url=${encodeURIComponent(directUrl)}`
-      if (playData.headers?.Referer) {
-        proxyUrl += `&referer=${encodeURIComponent(playData.headers.Referer)}`
-      }
-      return {
-        playUrl: directUrl,
-        proxyUrl,
-        referer: playData.headers?.Referer,
-        headers: playData.headers,
-      }
-    }
-
-    // High quality progressive MP4 (BytePlus / TopBuzz CDN / Akamai)
-    let proxyUrl = `/api/media/proxy?url=${encodeURIComponent(directUrl)}`
-    if (playData.headers?.Referer) {
-      proxyUrl += `&referer=${encodeURIComponent(playData.headers.Referer)}`
-    }
-
+  if (isHls) {
     return {
-      playUrl: directUrl,
-      proxyUrl,
-      referer: playData.headers?.Referer,
-      headers: playData.headers,
+      playUrl,
+      proxyUrl: `/api/media/m3u8?url=${encodeURIComponent(playUrl)}`,
+      referer: `${TVTFUN_BASE_URL}/`,
+      headers: {
+        Referer: `${TVTFUN_BASE_URL}/`,
+        'User-Agent': config.defaultUserAgent,
+      },
     }
   }
 
-  try {
-    return await doResolve()
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes('403') || msg.includes('凭证')) {
-      // Retry once with a fresh attempt
-      return await doResolve()
-    }
-    throw err
+  return {
+    playUrl,
+    proxyUrl: `/api/media/proxy?url=${encodeURIComponent(playUrl)}`,
+    referer: `${TVTFUN_BASE_URL}/`,
+    headers: {
+      Referer: `${TVTFUN_BASE_URL}/`,
+      'User-Agent': config.defaultUserAgent,
+    },
   }
 }

@@ -43,7 +43,8 @@ migrateLocalStorageKey('animaku-plugins', [
 /** v37: tune weights (xifan-next: 66, moonci: 65, cycani/mifun: 61, girigiri: 60, tvtfun: 51) */
 /** v38: tune girigiri weight to 55, fix mxdm relative xpath, omofun rank & unescape, xifan-next source_id */
 /** v39: tune girigiri weight to 59 (same as lzizy) & restore cycani oldAnimePriority */
-export const PLUGIN_DEFAULTS_VERSION = 39
+/** v40: add neosek (neosek.ai) built-in with weight 60 */
+export const PLUGIN_DEFAULTS_VERSION = 40
 
 interface PluginState {
   plugins: PluginMeta[]
@@ -363,6 +364,7 @@ export const usePluginStore = create<PluginState>()(
             'girigiri',
             'lzizy',
             'animoe',
+            'neosek',
           ].map((s) => s.toLowerCase()),
         )
         const onlyLegacyBuiltins = plugins.every(

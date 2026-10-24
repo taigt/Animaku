@@ -15,6 +15,7 @@ import { tvtfunAdapter } from './adapters/tvtfun'
 import { anime1Adapter } from './adapters/anime1'
 import { animoeAdapter } from './adapters/animoe'
 import { soraniAdapter } from './adapters/sorani'
+import { neosekAdapter } from './adapters/neosek'
 
 export interface SourceRegistryOptions {
   playback?: PlaybackRegistry
@@ -44,6 +45,7 @@ export class SourceRegistry {
       anime1Adapter,
       animoeAdapter,
       soraniAdapter,
+      neosekAdapter,
     ]
 
     for (const adapter of initialAdapters) {
@@ -112,6 +114,13 @@ export class SourceRegistry {
       normalized === '青空次元'
     ) {
       return this.adapters.get('sorani') || null
+    }
+    if (
+      normalized === 'neosek' ||
+      normalized === 'neosekai' ||
+      normalized === 'neosek.ai'
+    ) {
+      return this.adapters.get('neosekai') || null
     }
     return null
   }

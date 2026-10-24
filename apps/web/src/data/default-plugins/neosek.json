@@ -1,0 +1,23 @@
+{
+  "api": "1",
+  "type": "anime",
+  "name": "neosek",
+  "version": "1.0",
+  "weight": 60,
+  "titlePreference": "chinese",
+  "muliSources": false,
+  "useWebview": false,
+  "useNativePlayer": false,
+  "usePost": false,
+  "useLegacyParser": false,
+  "userAgent": "",
+  "baseURL": "https://neosek.ai/",
+  "searchURL": "https://neosek.ai/api/v1/search?q=@keyword&content_type=anime",
+  "searchList": "//a",
+  "searchName": ".",
+  "searchResult": ".",
+  "chapterRoads": "//div",
+  "chapterResult": ".//a",
+  "referer": "https://neosek.ai/",
+  "adBlockerMode": "none"
+}

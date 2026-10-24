@@ -8,6 +8,7 @@ import girigiri from './girigiri.json'
 import lzizy from './lzizy.json'
 import xifanNext from './xifan-next.json'
 import anime1 from './anime1.json'
+import neosek from './neosek.json'
 import sorani from './sorani.json'
 import mxdm from './mxdm.json'
 import omofun from './omofun.json'
@@ -21,6 +22,7 @@ import omofun from './omofun.json'
  * - cycani: 次元城 cycani.org — RESTful JSON API + multiple player lines + CF 1080P MP4 (weight: 61, titlePreference: chinese, oldAnimePriority: true)
  * - mifun: MiFun ios.mifun.org — MacCMS suggest + data.m3u8.in resolver + 1080P Douyin/Baidu MP4 (weight: 61, titlePreference: chinese_compact)
  * - anime1: Anime1 anime1.me — 繁体源 + 动态 Cookie 鉴权 MP4 直链 (weight: 60, titlePreference: traditional, platforms: ['app'])
+ * - neosek: neosek neosek.ai — RESTful JSON API + &content_type=anime + 香港 CDN fMP4 HLS (weight: 60, titlePreference: chinese)
  * - girigiri: girigiri愛動漫 ani.girigirilove.com — MacCMS suggest + encrypt:2 + 1080P CF HLS (weight: 59, titlePreference: chinese)
  * - lzizy: 量子资源 lzizy.net / cj.lziapi.com — Apple CMS V10 JSON API + 全品类影视 + 0ms 纯直链 HLS (weight: 59, titlePreference: chinese)
  * - animoe: Animoe animoe.org — MacCMS suggest API + 多线路字幕组 + 网易云 CDN fMP4 HLS (weight: 58, titlePreference: chinese)
@@ -36,6 +38,7 @@ export const ALL_BUILTIN_PLUGIN_RULES: PluginRule[] = [
   cycani as PluginRule,
   mifun as PluginRule,
   anime1 as PluginRule,
+  neosek as PluginRule,
   girigiri as PluginRule,
   lzizy as PluginRule,
   animoe as PluginRule,

@@ -912,6 +912,22 @@ export async function searchWithRule(
     }
   }
 
+  // neosek — dedicated adapter (RESTful JSON API + &content_type=anime)
+  {
+    const { isNeosekRule, searchNeosek } = await import('../lib/neosek')
+    if (isNeosekRule(rule)) {
+      try {
+        return await searchNeosek(rule, keyword)
+      } catch (e) {
+        return {
+          pluginName: rule.name,
+          items: [],
+          diagnostics: [e instanceof Error ? e.message : String(e)],
+        }
+      }
+    }
+  }
+
   // moonci — dedicated adapter (Ajax Suggest JSON API + Web Search Fallback)
   {
     const { isMoonciRule, searchMoonci } = await import('../lib/moonci')
@@ -1276,6 +1292,22 @@ export async function chaptersWithRule(
     if (isTvTFunRule(rule)) {
       try {
         return await chaptersTvTFun(rule, source)
+      } catch (e) {
+        return {
+          pluginName: rule.name,
+          roads: [],
+          diagnostics: [e instanceof Error ? e.message : String(e)],
+        }
+      }
+    }
+  }
+
+  // neosek — dedicated adapter (RESTful JSON units API)
+  {
+    const { isNeosekRule, chaptersNeosek } = await import('../lib/neosek')
+    if (isNeosekRule(rule)) {
+      try {
+        return await chaptersNeosek(rule, source)
       } catch (e) {
         return {
           pluginName: rule.name,
@@ -1886,6 +1918,14 @@ export async function resolvePlay(
     const { isTvTFunRule, resolveTvTFun } = await import('../lib/tvtfun')
     if (isTvTFunRule(rule)) {
       return wrapResolveWithTicket(rule, await resolveTvTFun(rule, pageUrl))
+    }
+  }
+
+  // neosek: dedicated adapter (RESTful unit items + HLS direct stream)
+  {
+    const { isNeosekRule, resolveNeosek } = await import('../lib/neosek')
+    if (isNeosekRule(rule)) {
+      return wrapResolveWithTicket(rule, await resolveNeosek(rule, pageUrl))
     }
   }
 

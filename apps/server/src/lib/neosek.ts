@@ -83,6 +83,10 @@ interface NeosekUnitItemsResponse {
           url?: string
           fallbacks?: string[]
         }
+        original?: {
+          url?: string
+          fallbacks?: string[]
+        }
       }
     }>
   }
@@ -273,23 +277,30 @@ export async function resolveNeosek(
     throw new Error(`Neosek 未返回有效视频项: ${json.message || '空数据'}`)
   }
 
-  const videoItem = json.data.items.find((item) => item.video?.hls?.url) || json.data.items[0]
+  const videoItem = json.data.items[0]
+  const originalUrl = videoItem?.video?.original?.url
   const hlsUrl = videoItem?.video?.hls?.url
 
-  if (!hlsUrl) {
-    throw new Error('未获取到有效 HLS 播放直链')
+  // 特殊处理说明：
+  // 若原站提供有独立 mp4 原画直链，优先以 mp4 交付；否则回退 hls 直链
+  const isDirectMp4 = Boolean(originalUrl && originalUrl.toLowerCase().includes('.mp4'))
+  const playUrl = isDirectMp4 ? originalUrl! : (hlsUrl || originalUrl)
+
+  if (!playUrl) {
+    throw new Error('未获取到有效播放直链')
   }
 
+  const isHls = playUrl.includes('.m3u8')
   return {
-    playUrl: hlsUrl,
-    proxyUrl: `/api/media/m3u8?url=${encodeURIComponent(hlsUrl)}`,
-    format: 'hls',
-    contentType: 'application/vnd.apple.mpegurl',
+    playUrl,
+    proxyUrl: isHls ? `/api/media/m3u8?url=${encodeURIComponent(playUrl)}` : `/api/media/proxy?url=${encodeURIComponent(playUrl)}`,
+    format: isHls ? 'hls' : 'mp4',
+    contentType: isHls ? 'application/vnd.apple.mpegurl' : 'video/mp4',
     referer: `${NEOSEK_BASE_URL}/`,
     headers: {
       'User-Agent': config.defaultUserAgent,
       Referer: `${NEOSEK_BASE_URL}/`,
     },
-    diagnostics: [`成功解析 neosek 直链: ${hlsUrl}`],
+    diagnostics: [`成功解析 neosek 直链: ${playUrl}`],
   }
 }

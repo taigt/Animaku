@@ -2178,6 +2178,26 @@ body.kz-has-web-fs header {
   color: #94a3b8;
 }
 
+/*
+ * 原生字幕 ::cue 样式 — 参考源站 neosek 样式：
+ * 1. 彻底去除浏览器原生默认的半透明黑底背景；
+ * 2. 纯白字色 + 360° 抗锯齿纯黑柔和描边微阴影；
+ * 3. 现代化无衬线字族与响应式视口自适应字号。
+ */
+::cue,
+video::cue {
+  background: transparent !important;
+  color: #ffffff !important;
+  font-family: 'Microsoft YaHei UI', 'PingFang SC', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif !important;
+  font-size: calc(max(15px, min(4.4cqh, 3.6cqw))) !important;
+  line-height: 1.4 !important;
+  text-shadow:
+    0 0 3px #000,
+    0 0 5px #000,
+    0 0 8px #000,
+    0 1.5px 2px #000 !important;
+}
+
 .kz-dm-toggle-row {
   display: flex;
   align-items: center;

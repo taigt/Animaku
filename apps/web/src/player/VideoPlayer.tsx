@@ -54,6 +54,7 @@ import {
   usePlaybackResume,
   useMediaEngine,
   useAudioBooster,
+  useAssEngine,
 } from './hooks'
 
 export type { DanmakuPanelState, VideoPlayerProps } from './types'
@@ -95,6 +96,8 @@ export function VideoPlayer({
   totalEpisodes,
   officialOpedData,
   expectedDurationSeconds,
+  subtitles,
+  fonts,
   widescreen: controlledWidescreen,
   onToggleWidescreen: controlledToggleWidescreen,
 }: VideoPlayerProps) {
@@ -108,6 +111,13 @@ export function VideoPlayer({
 
   // 极轻量播放器时间发布订阅 store（阻断高频 current 向 VideoPlayer 及 Controls 传播）
   const timeStore = useRef(createPlayerTimeStore(initialTime)).current
+
+  // JASSUB WebAssembly ASS Subtitle Engine
+  const { activeTrack: activeAssTrack, setCanvasEl: setAssCanvasEl } = useAssEngine({
+    videoRef,
+    subtitles,
+    fonts,
+  })
 
   // Local video playback override
   const [localVideo, setLocalVideo] = useState<{ url: string; name: string } | null>(null)
@@ -1207,6 +1217,39 @@ export function VideoPlayer({
         }}
       />
 
+      {/* JASSUB WebAssembly ASS subtitle canvas (z-index: 2, 位于视频之上、弹幕层之下) */}
+      {activeAssTrack ? (
+        <canvas
+          key={activeAssTrack.url}
+          ref={setAssCanvasEl}
+          className="kz-ass-canvas"
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: aspectRatio === '4:3' ? '50%' : 0,
+            transform: [
+              aspectRatio === '4:3' ? 'translateX(-50%)' : '',
+              mirror ? 'scaleX(-1)' : '',
+            ]
+              .filter(Boolean)
+              .join(' ') || undefined,
+            width: aspectRatio === '4:3' ? 'auto' : '100%',
+            height: '100%',
+            maxWidth: '100%',
+            aspectRatio: aspectRatio === '4:3' ? '4 / 3' : undefined,
+            objectFit:
+              aspectRatio === 'cover'
+                ? 'cover'
+                : aspectRatio === 'fill' || aspectRatio === '4:3'
+                  ? 'fill'
+                  : 'contain',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
+      ) : null}
+
       {/* Danmaku layer */}
       <div
         ref={layerRef}
@@ -1217,7 +1260,7 @@ export function VideoPlayer({
           top: 0,
           width: '100%',
           height: '100%',
-          zIndex: 2,
+          zIndex: 3,
           pointerEvents: 'none',
           background: 'transparent',
           overflow: 'hidden',

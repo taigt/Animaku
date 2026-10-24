@@ -275,6 +275,9 @@ export default defineConfig(({ mode }) => {
         '@animaku/shared': path.resolve(repoRoot, 'packages/shared/src/index.ts'),
       },
     },
+    worker: {
+      format: 'es',
+    },
     build: {
       rollupOptions: {
         output: {
@@ -282,6 +285,7 @@ export default defineConfig(({ mode }) => {
             if (!id.includes('node_modules')) return
             if (id.includes('hls.js')) return 'hls'
             if (id.includes('anime4k-webgpu')) return 'anime4k'
+            if (id.includes('jassub')) return 'jassub'
             if (
               id.includes('/react/') ||
               id.includes('/react-dom/') ||

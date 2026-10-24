@@ -21,6 +21,7 @@ import {
   type ResolvePlayResult,
   type Road,
   type SearchItem,
+  type SubtitleTrack,
 } from '@animaku/shared'
 import { config } from '../config'
 import { assertPublicHttpUrl, fetchPublic } from './private-host'
@@ -87,6 +88,20 @@ interface NeosekUnitItemsResponse {
           url?: string
           fallbacks?: string[]
         }
+        subtitles?: Array<{
+          id?: string
+          language?: string | null
+          label?: string
+          default?: boolean
+          vtt?: { url?: string }
+          ass?: { url?: string }
+        }>
+        fonts?: Array<{
+          id?: string
+          name?: string
+          families?: string[]
+          file?: { url?: string }
+        }>
       }
     }>
   }
@@ -291,6 +306,42 @@ export async function resolveNeosek(
   }
 
   const isHls = playUrl.includes('.m3u8')
+
+  // 提取字幕与字体包资源（优先保留 ASS 特效字幕）
+  const subtitles: SubtitleTrack[] = []
+  if (Array.isArray(videoItem?.video?.subtitles)) {
+    for (const sub of videoItem.video.subtitles) {
+      const assUrl = sub.ass?.url
+      const vttUrl = sub.vtt?.url
+      if (assUrl) {
+        subtitles.push({
+          id: sub.id || `sub-${subtitles.length}`,
+          label: sub.label || 'ASS Subtitle',
+          url: assUrl,
+          format: 'ass',
+          default: Boolean(sub.default),
+        })
+      } else if (vttUrl) {
+        subtitles.push({
+          id: sub.id || `sub-${subtitles.length}`,
+          label: sub.label || 'VTT Subtitle',
+          url: vttUrl,
+          format: 'vtt',
+          default: Boolean(sub.default),
+        })
+      }
+    }
+  }
+
+  const fonts: string[] = []
+  if (Array.isArray(videoItem?.video?.fonts)) {
+    for (const f of videoItem.video.fonts) {
+      if (f.file?.url) {
+        fonts.push(f.file.url)
+      }
+    }
+  }
+
   return {
     playUrl,
     proxyUrl: isHls ? `/api/media/m3u8?url=${encodeURIComponent(playUrl)}` : `/api/media/proxy?url=${encodeURIComponent(playUrl)}`,
@@ -302,5 +353,7 @@ export async function resolveNeosek(
       Referer: `${NEOSEK_BASE_URL}/`,
     },
     diagnostics: [`成功解析 neosek 直链: ${playUrl}`],
+    subtitles: subtitles.length > 0 ? subtitles : undefined,
+    fonts: fonts.length > 0 ? fonts : undefined,
   }
 }

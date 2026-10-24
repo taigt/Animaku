@@ -339,6 +339,14 @@ export interface PluginChapterResult {
   diagnostics?: string[]
 }
 
+export interface SubtitleTrack {
+  id: string
+  label: string
+  url: string
+  format: 'ass' | 'vtt'
+  default?: boolean
+}
+
 export interface ResolvePlayResult {
   playUrl: string
   proxyUrl: string
@@ -352,6 +360,10 @@ export interface ResolvePlayResult {
   format?: 'hls' | 'mp4'
   /** Declared or inferred ad blocker mode ('none' | 'client' | 'server') */
   adBlockerMode?: AdBlockerMode
+  /** Optional subtitle tracks (e.g. ASS/VTT extracted from source) */
+  subtitles?: SubtitleTrack[]
+  /** Optional font file URLs for advanced ASS rendering */
+  fonts?: string[]
 }
 
 const CHINESE_DIGITS: Record<string, number> = {

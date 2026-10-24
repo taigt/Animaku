@@ -231,6 +231,8 @@ export type WatchSession = {
   resolveLoading: boolean
   resolveError: unknown
   diagnostics: string[] | undefined
+  subtitles?: import('@animaku/shared').SubtitleTrack[]
+  fonts?: string[]
   danmakuSettings: DanmakuSettings
   playerSettings: PlayerSettings
   setDanmaku: (p: Partial<DanmakuSettings>) => void
@@ -2186,6 +2188,8 @@ export function useWatchSession(bangumiId: number): WatchSession {
     resolveLoading: Boolean(selection && episode && resolve.isLoading),
     resolveError: resolve.error,
     diagnostics: resolve.data?.data.diagnostics,
+    subtitles: resolve.data?.data.subtitles,
+    fonts: resolve.data?.data.fonts,
     danmakuSettings,
     playerSettings: resolvedPlayerSettings,
     setDanmaku,

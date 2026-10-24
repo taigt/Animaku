@@ -1,6 +1,6 @@
 {
   "name": "@animaku/web",
-  "version": "1.21.1",
+  "version": "1.22.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,7 @@
     "anime4k-webgpu": "^1.0.0",
     "clsx": "^2.1.1",
     "hls.js": "^1.5.20",
+    "jassub": "^2.5.23",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.4.0",

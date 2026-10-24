@@ -34,4 +34,5 @@ export {
   type UseAudioBoosterOptions,
   type UseAudioBoosterResult,
 } from './useAudioBooster'
+export { useAssEngine, selectBestAssTrack } from './useAssEngine'
 

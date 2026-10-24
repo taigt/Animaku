@@ -7,7 +7,7 @@
  * Desktop vs mobile chrome lives under `./chrome/*` so edits to one side
  * do not touch the other.
  */
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import './plyr-overrides.css'
 import {
   determineOpedAction,
@@ -118,6 +118,48 @@ export function VideoPlayer({
     subtitles,
     fonts,
   })
+
+  // 原生 WebVTT 软字幕回退通道（仅当无 ASS 时生效，天然互斥，零冲突）
+  const vttTrack = useMemo(() => {
+    if (activeAssTrack || !subtitles?.length) return null
+    const vtts = subtitles.filter((s) => s.format === 'vtt' && s.url)
+    return (
+      vtts.find((s) => s.default) ||
+      vtts.find((s) => /chs|sc|简/i.test(s.label || s.id)) ||
+      vtts[0] ||
+      null
+    )
+  }, [activeAssTrack, subtitles])
+
+  const [vttBlobUrl, setVttBlobUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!vttTrack?.url) {
+      setVttBlobUrl(null)
+      return
+    }
+    let alive = true
+    let currentBlob: string | null = null
+
+    /*
+     * 特殊处理说明：
+     * 1. 采用主线程 fetch 转同源 blob: URL，避免跨域字幕被浏览器的 CORS / CORB 隔离拦截；
+     * 2. <video> 元素无需添加 crossOrigin="anonymous"，彻底杜绝防盗链第三方视频流因无 CORS 头而黑屏的问题；
+     * 3. 换集或切换为 ASS 时，自动调用 revokeObjectURL 释放浏览器内存。
+     */
+    fetch(vttTrack.url)
+      .then((r) => r.text())
+      .then((text) => {
+        if (!alive) return
+        currentBlob = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }))
+        setVttBlobUrl(currentBlob)
+      })
+      .catch(() => {})
+
+    return () => {
+      alive = false
+      if (currentBlob) URL.revokeObjectURL(currentBlob)
+    }
+  }, [vttTrack])
 
   // Local video playback override
   const [localVideo, setLocalVideo] = useState<{ url: string; name: string } | null>(null)
@@ -1184,7 +1226,17 @@ export function VideoPlayer({
           background: '#000',
           zIndex: 0,
         }}
-      />
+      >
+        {vttBlobUrl ? (
+          <track
+            key={vttTrack?.url}
+            src={vttBlobUrl}
+            kind="subtitles"
+            label={vttTrack?.label || 'Subtitles'}
+            default
+          />
+        ) : null}
+      </video>
 
       {/* Anime4K output canvas */}
       <canvas

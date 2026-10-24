@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SubtitleTrack } from '@animaku/shared'
+import JASSUB from 'jassub'
+import workerUrl from 'jassub/dist/wasm/jassub-worker.js?worker&url'
+import wasmUrl from 'jassub/dist/wasm/jassub-worker.wasm?url'
+import modernWasmUrl from 'jassub/dist/wasm/jassub-worker-modern.wasm?url'
 
 interface UseAssEngineOptions {
   videoRef: React.RefObject<HTMLVideoElement | null>
@@ -41,7 +45,7 @@ export function useAssEngine({
 }: UseAssEngineOptions) {
   const activeTrack = useMemo(() => selectBestAssTrack(subtitles), [subtitles])
   const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null)
-  const jassubRef = useRef<any>(null)
+  const jassubRef = useRef<JASSUB | null>(null)
 
   useEffect(() => {
     const video = videoRef.current
@@ -58,50 +62,55 @@ export function useAssEngine({
     }
 
     let disposed = false
-    let instance: any = null
+    let instance: JASSUB | null = null
 
-    // 当 ASS 激活时，隐藏原生 video.textTracks，防止两层字幕冲突重叠
-    const suppressNativeTracks = () => {
-      try {
-        for (let i = 0; i < video.textTracks.length; i++) {
-          video.textTracks[i].mode = 'disabled'
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    suppressNativeTracks()
-    video.textTracks.addEventListener?.('change', suppressNativeTracks)
+    /*
+     * 特殊处理说明：
+     * 1. Canvas 预先对齐视频物理分辨率，防止 transferControlToOffscreen 后默认为 300x150 导致画面模糊拉伸；
+     * 2. 传入通过 Vite ?worker&url / ?url 显式引用的 Worker 与 WASM 路径，彻底杜绝运行时相对路径探测断裂；
+     * 3. 仅在 JASSUB 真正 ready 成功后才关闭原生软字幕轨，避免双层重叠；若发生异常则保持原生轨道。
+     */
+    const vWidth = video.videoWidth || 1920
+    const vHeight = video.videoHeight || 1080
+    canvasEl.width = vWidth
+    canvasEl.height = vHeight
 
-    // 动态懒加载 JASSUB，避免在无 ASS 字幕时增加首屏包大小
-    void import('jassub')
-      .then(({ default: JASSUB }) => {
-        if (disposed) return
+    try {
+      instance = new JASSUB({
+        video,
+        canvas: canvasEl,
+        subUrl: activeTrack.url,
+        fonts: fonts && fonts.length > 0 ? fonts : undefined,
+        workerUrl,
+        wasmUrl,
+        modernWasmUrl,
+        prescaleFactor: 1.0,
+        prescaleHeightLimit: 1080,
+        maxRenderHeight: 0,
+      })
+      jassubRef.current = instance
 
-        /*
-         * 特殊处理说明：
-         * HTMLCanvasElement 在调用 transferControlToOffscreen 后被锁定所有权，
-         * 无法被二次绑定或获取 2D 上下文。外部必须使用 key={activeTrack.url}
-         * 保证每次换集或换轨重新实例化时，Canvas 均为新创建的纯净 DOM 节点。
-         */
-        instance = new JASSUB({
-          video,
-          canvas: canvasEl,
-          subUrl: activeTrack.url,
-          fonts: fonts && fonts.length > 0 ? fonts : undefined,
-          prescaleFactor: 1.0,
-          prescaleHeightLimit: 1080,
-          maxRenderHeight: 0,
+      instance.ready
+        .then(() => {
+          if (disposed) return
+          // JASSUB 成功挂载后，静默禁用原生 video.textTracks，防止两层字幕重叠
+          try {
+            for (let i = 0; i < video.textTracks.length; i++) {
+              video.textTracks[i].mode = 'disabled'
+            }
+          } catch {
+            /* ignore */
+          }
         })
-        jassubRef.current = instance
-      })
-      .catch((err) => {
-        console.warn('[JASSUB] 初始化失败，回退原生字幕渲染:', err)
-      })
+        .catch((err) => {
+          console.warn('[JASSUB] ready failed:', err)
+        })
+    } catch (err) {
+      console.warn('[JASSUB] constructor error:', err)
+    }
 
     return () => {
       disposed = true
-      video.textTracks.removeEventListener?.('change', suppressNativeTracks)
       if (instance) {
         try {
           void instance.destroy()

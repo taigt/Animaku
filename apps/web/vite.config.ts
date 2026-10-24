@@ -275,6 +275,9 @@ export default defineConfig(({ mode }) => {
         '@animaku/shared': path.resolve(repoRoot, 'packages/shared/src/index.ts'),
       },
     },
+    optimizeDeps: {
+      include: ['jassub'],
+    },
     worker: {
       format: 'es',
     },

@@ -59,6 +59,7 @@ interface SoraniSearchRecord {
   id: number
   title: string
   bangumiId?: number
+  malId?: number
   alias?: string
   cover?: string
   episodeCount?: number
@@ -117,10 +118,18 @@ export async function searchSorani(
     }
 
     const records = json.data?.records || []
-    const items: SearchItem[] = records.map((item) => ({
-      name: item.title?.trim() || `番剧 #${item.id}`,
-      src: `${SORANI_WEB_BASE}/anime/mal/${item.id}`,
-    }))
+    const items: SearchItem[] = records.map((item) => {
+      // 特殊处理说明：对齐青空次元官方前端规范，番剧详情链接若存在 malId 则采用 /anime/mal/:malId 路径，
+      // 并在 query 携带原始 video id 供 chapters 请求 API 时精准定位；若无 malId 则直接采用 /anime/:id 路径
+      const animeUrl =
+        item.malId && String(item.malId).trim().length > 0
+          ? `${SORANI_WEB_BASE}/anime/mal/${item.malId}?id=${item.id}`
+          : `${SORANI_WEB_BASE}/anime/${item.id}`
+      return {
+        name: item.title?.trim() || `番剧 #${item.id}`,
+        src: animeUrl,
+      }
+    })
 
     diagnostics.push(`青空次元搜索成功: 命中 ${items.length} 部番剧`)
     return {
@@ -139,6 +148,16 @@ export async function searchSorani(
 
 export function extractSoraniVideoId(source: string): number | null {
   const trimmed = source.trim()
+  try {
+    const parsed = new URL(trimmed)
+    const qId = parsed.searchParams.get('id') || parsed.searchParams.get('videoId')
+    if (qId && /^\d+$/.test(qId.trim())) {
+      return Number(qId.trim())
+    }
+  } catch {
+    // 非完整 URL，平滑降级走正则提取
+  }
+
   const match =
     trimmed.match(/\/anime\/(?:mal\/)?(\d+)/i) ||
     trimmed.match(/\/video\/(\d+)/i)
@@ -218,9 +237,13 @@ export async function chaptersSorani(
       (a, b) => (a.episodeOrder ?? 0) - (b.episodeOrder ?? 0),
     )
 
-    const data = sorted.map(
-      (ep) => `${SORANI_WEB_BASE}/anime/mal/${videoId}/episode/${ep.episodeId}`,
-    )
+    // 特殊处理说明：对齐青空次元官方播放路由 /anime/mal/:id/episode/:order (如 /episode/01)，
+    // 并在 query 携带 epId 供播放解析时极速定位真实 episodeId
+    const data = sorted.map((ep, idx) => {
+      const rawOrder = ep.episodeOrder ?? idx + 1
+      const orderStr = String(rawOrder).padStart(2, '0')
+      return `${SORANI_WEB_BASE}/anime/mal/${videoId}/episode/${orderStr}?epId=${ep.episodeId}`
+    })
     const identifier = sorted.map(
       (ep) => (ep.episodeLabel || ep.title || `第${ep.episodeOrder ?? ''}集`).trim(),
     )
@@ -250,6 +273,18 @@ export async function chaptersSorani(
 
 export function extractSoraniEpisodeId(pageUrl: string): number | null {
   const trimmed = pageUrl.trim()
+  try {
+    const parsed = new URL(trimmed)
+    const qEpId =
+      parsed.searchParams.get('epId') ||
+      parsed.searchParams.get('episodeId')
+    if (qEpId && /^\d+$/.test(qEpId.trim())) {
+      return Number(qEpId.trim())
+    }
+  } catch {
+    // 非完整 URL，平滑降级走正则提取
+  }
+
   const match = trimmed.match(/\/episode\/(\d+)/i)
   if (match) return Number(match[1])
   if (/^\d+$/.test(trimmed)) return Number(trimmed)

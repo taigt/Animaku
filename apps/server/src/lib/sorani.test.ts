@@ -45,6 +45,8 @@ test('sorani: isSoraniRule matches rules correctly', () => {
 test('sorani: ID extraction helpers work robustly', () => {
   assert.equal(extractSoraniVideoId('https://www.sorani.net/anime/mal/828'), 828)
   assert.equal(extractSoraniVideoId('https://www.sorani.net/anime/828'), 828)
+  assert.equal(extractSoraniVideoId('https://www.sorani.net/anime/mal/50410?id=828'), 828)
+  assert.equal(extractSoraniVideoId('https://www.sorani.net/anime/50410?videoId=828'), 828)
   assert.equal(extractSoraniVideoId('/video/4489'), 4489)
   assert.equal(extractSoraniVideoId('828'), 828)
   assert.equal(extractSoraniVideoId('invalid_string'), null)
@@ -52,6 +54,14 @@ test('sorani: ID extraction helpers work robustly', () => {
   assert.equal(
     extractSoraniEpisodeId('https://www.sorani.net/anime/mal/828/episode/9604'),
     9604,
+  )
+  assert.equal(
+    extractSoraniEpisodeId('https://www.sorani.net/anime/mal/828/episode/01?epId=9604'),
+    9604,
+  )
+  assert.equal(
+    extractSoraniEpisodeId('https://www.sorani.net/anime/mal/828/episode/02?episodeId=9605'),
+    9605,
   )
   assert.equal(extractSoraniEpisodeId('/episode/12345'), 12345)
   assert.equal(extractSoraniEpisodeId('9604'), 9604)

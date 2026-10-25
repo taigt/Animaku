@@ -65,7 +65,7 @@ export async function bangumiFetch(
   }
   const { token: _t, timeoutMs, ...rest } = init
   const ms = timeoutMs ?? DEFAULT_TIMEOUT_MS
-  return fetchPublic(url, { ...rest, headers }, { timeoutMs: ms })
+  return fetchPublic(url, { ...rest, headers }, { timeoutMs: ms, source: 'bangumi' })
 }
 
 export function getBearerToken(authHeader: string | undefined): string | null {

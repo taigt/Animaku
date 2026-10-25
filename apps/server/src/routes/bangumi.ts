@@ -208,89 +208,41 @@ bangumiRoutes.get('/trending', async (c) => {
   }
 
   let items: BangumiItem[] = []
-  let success = false
-  let lastError = 'upstream'
 
-  // Attempt 1: p1/trending/subjects (provided by next.bgm.tv)
+  // 特殊处理说明：直接使用用户设置的 Bangumi API (apiUrl) 官方 v0 检索接口按当前季度+热度排序，
+  // 杜绝外部第三方 next.bgm.tv 带来的握手超时与不稳定，严格尊重用户配置的 mirror / 代理
   try {
-    const url = new URL(`${config.bangumiNextApi}/p1/trending/subjects`)
-    url.searchParams.set('type', type)
-    url.searchParams.set('limit', limit)
-    url.searchParams.set('offset', offset)
-    const res = await bangumiFetch(url.toString())
+    const seasonStart = getCurrentSeasonAirDate()
+    const searchUrl = `${apiUrl}/v0/search/subjects?limit=${limit}&offset=${offset}`
+    const res = await bangumiFetch(searchUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        // 特殊处理说明：Bangumi v0 检索接口规定 keyword 为必填项，纯过滤查询必须传递 '*' 通配符
+        keyword: '*',
+        sort: 'heat',
+        filter: {
+          type: [Number(type) || 2],
+          nsfw: false,
+          air_date: [`>=${seasonStart}`],
+        },
+      }),
+    })
     if (res.ok) {
       const json = (await res.json()) as { data?: unknown[] }
-      if (Array.isArray(json.data) && json.data.length > 0) {
-        for (const entry of json.data) {
-          try {
-            const e = entry as Record<string, unknown>
-            const subjectRaw = (e.subject as Record<string, unknown>) || e
-            const subject =
-              e.subject && typeof e.subject === 'object'
-                ? {
-                    ...subjectRaw,
-                    watchers: e.watchers ?? subjectRaw.watchers,
-                    heat: e.count ?? subjectRaw.heat,
-                  }
-                : subjectRaw
-            items.push(slimItem(parseBangumiItem(subject)))
-          } catch {
-            /* skip */
-          }
-        }
-        if (items.length > 0) {
-          success = true
+      for (const entry of json.data || []) {
+        try {
+          items.push(slimItem(parseBangumiItem(entry as Record<string, unknown>)))
+        } catch {
+          /* skip */
         }
       }
     } else {
-      lastError = await res.text()
+      return c.json({ error: 'upstream', message: await res.text() }, 502)
     }
   } catch (err) {
-    lastError = err instanceof Error ? err.message : String(err)
-  }
-
-  // Attempt 2: Fallback to /v0/search/subjects filtered by current season and sorted by heat
-  if (!success) {
-    try {
-      const seasonStart = getCurrentSeasonAirDate()
-      const searchUrl = `${apiUrl}/v0/search/subjects?limit=${limit}&offset=${offset}`
-      const res = await bangumiFetch(searchUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          // 特殊处理说明：Bangumi v0 检索接口规定 keyword 为必填项，纯过滤查询必须传递 '*' 通配符
-          keyword: '*',
-          sort: 'heat',
-          filter: {
-            type: [Number(type) || 2],
-            nsfw: false,
-            air_date: [`>=${seasonStart}`],
-          },
-        }),
-      })
-      if (res.ok) {
-        const json = (await res.json()) as { data?: unknown[] }
-        items = []
-        for (const entry of json.data || []) {
-          try {
-            items.push(slimItem(parseBangumiItem(entry as Record<string, unknown>)))
-          } catch {
-            /* skip */
-          }
-        }
-        if (items.length > 0) {
-          success = true
-        }
-      } else {
-        lastError = await res.text()
-      }
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err)
-    }
-  }
-
-  if (!success) {
-    return c.json({ error: 'upstream', message: lastError }, 502)
+    const message = err instanceof Error ? err.message : String(err)
+    return c.json({ error: 'upstream', message }, 502)
   }
 
   const payload = { data: items }
@@ -1400,7 +1352,8 @@ bangumiRoutes.get('/subjects/:id/comments', async (c) => {
       url.searchParams.set('offset', String(chunkStartOffset))
       if (type) url.searchParams.set('type', type)
 
-      const res = await bangumiFetch(url.toString())
+      // 特殊处理说明：next.bgm.tv 评论服务若遇网络受阻或速率限制，设置 4 秒快速超时，避免前端详情页评论区无限转圈
+      const res = await bangumiFetch(url.toString(), { timeoutMs: 4_000 })
       if (!res.ok) {
         const emptyPayload: CommentPagePayload = {
           data: [],

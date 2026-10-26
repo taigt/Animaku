@@ -311,6 +311,7 @@ export class SourceRegistry {
       requiresProxy: Boolean(raw.credentials),
       playUrl: raw.mediaUrl,
       headers: raw.publicHeaders,
+      subtitle: raw.subtitle,
     }
   }
 }

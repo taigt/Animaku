@@ -347,6 +347,11 @@ export interface SubtitleTrack {
   default?: boolean
 }
 
+export interface SubtitleBundle {
+  subtitles?: SubtitleTrack[]
+  fonts?: string[]
+}
+
 export interface ResolvePlayResult {
   playUrl: string
   proxyUrl: string
@@ -360,6 +365,8 @@ export interface ResolvePlayResult {
   format?: 'hls' | 'mp4'
   /** Declared or inferred ad blocker mode ('none' | 'client' | 'server') */
   adBlockerMode?: AdBlockerMode
+  /** Unified subtitle & font assets extracted from source */
+  subtitle?: SubtitleBundle
   /** Optional subtitle tracks (e.g. ASS/VTT extracted from source) */
   subtitles?: SubtitleTrack[]
   /** Optional font file URLs for advanced ASS rendering */

@@ -1,6 +1,7 @@
 import type {
   PluginSearchResult,
   PluginChapterResult,
+  SubtitleBundle,
 } from '@animaku/shared'
 
 /**
@@ -33,6 +34,8 @@ export interface RawResolveResult {
   format?: 'hls' | 'mp4'
   /** 资产生存时长（毫秒） */
   ttlMs?: number
+  /** 源站配套字幕与字体包 */
+  subtitle?: SubtitleBundle
 }
 
 /**
@@ -76,6 +79,8 @@ export interface SourceResolveOutput {
   playUrl?: string
   /** 直连所需的请求头 (含 Cookie, Referer 等) */
   headers?: Record<string, string>
+  /** 源站配套字幕与字体包 */
+  subtitle?: SubtitleBundle
 }
 
 /**

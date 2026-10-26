@@ -96,8 +96,9 @@ export function VideoPlayer({
   totalEpisodes,
   officialOpedData,
   expectedDurationSeconds,
-  subtitles,
-  fonts,
+  subtitle,
+  subtitles: legacySubtitles,
+  fonts: legacyFonts,
   widescreen: controlledWidescreen,
   onToggleWidescreen: controlledToggleWidescreen,
 }: VideoPlayerProps) {
@@ -112,24 +113,28 @@ export function VideoPlayer({
   // 极轻量播放器时间发布订阅 store（阻断高频 current 向 VideoPlayer 及 Controls 传播）
   const timeStore = useRef(createPlayerTimeStore(initialTime)).current
 
+  const effectiveSubtitles = subtitle?.subtitles ?? legacySubtitles
+  const effectiveFonts = subtitle?.fonts ?? legacyFonts
+
   // JASSUB WebAssembly ASS Subtitle Engine
   const { activeTrack: activeAssTrack, setCanvasEl: setAssCanvasEl } = useAssEngine({
     videoRef,
-    subtitles,
-    fonts,
+    subtitle,
+    subtitles: effectiveSubtitles,
+    fonts: effectiveFonts,
   })
 
   // 原生 WebVTT 软字幕回退通道（仅当无 ASS 时生效，天然互斥，零冲突）
   const vttTrack = useMemo(() => {
-    if (activeAssTrack || !subtitles?.length) return null
-    const vtts = subtitles.filter((s) => s.format === 'vtt' && s.url)
+    if (activeAssTrack || !effectiveSubtitles?.length) return null
+    const vtts = effectiveSubtitles.filter((s) => s.format === 'vtt' && s.url)
     return (
       vtts.find((s) => s.default) ||
       vtts.find((s) => /chs|sc|简/i.test(s.label || s.id)) ||
       vtts[0] ||
       null
     )
-  }, [activeAssTrack, subtitles])
+  }, [activeAssTrack, effectiveSubtitles])
 
   const [vttBlobUrl, setVttBlobUrl] = useState<string | null>(null)
   useEffect(() => {

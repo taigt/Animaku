@@ -106,6 +106,8 @@ export interface VideoPlayerProps {
   officialOpedData?: Map<number, import('../lib/bangumi-oped').BgmOpedEntry> | null
   /** Expected episode duration in seconds from Bangumi metadata for OP/ED mismatch audit */
   expectedDurationSeconds?: number
+  /** Unified subtitle bundle (tracks & fonts) */
+  subtitle?: import('@animaku/shared').SubtitleBundle
   /** Subtitle tracks (e.g. ASS/VTT extracted from source) */
   subtitles?: import('@animaku/shared').SubtitleTrack[]
   /** Optional font file URLs for ASS rendering */

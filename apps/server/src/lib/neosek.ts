@@ -21,6 +21,7 @@ import {
   type ResolvePlayResult,
   type Road,
   type SearchItem,
+  type SubtitleBundle,
   type SubtitleTrack,
 } from '@animaku/shared'
 import { config } from '../config'
@@ -342,6 +343,14 @@ export async function resolveNeosek(
     }
   }
 
+  const subtitle: SubtitleBundle | undefined =
+    subtitles.length > 0 || fonts.length > 0
+      ? {
+          subtitles: subtitles.length > 0 ? subtitles : undefined,
+          fonts: fonts.length > 0 ? fonts : undefined,
+        }
+      : undefined
+
   return {
     playUrl,
     proxyUrl: isHls ? `/api/media/m3u8?url=${encodeURIComponent(playUrl)}` : `/api/media/proxy?url=${encodeURIComponent(playUrl)}`,
@@ -353,6 +362,7 @@ export async function resolveNeosek(
       Referer: `${NEOSEK_BASE_URL}/`,
     },
     diagnostics: [`成功解析 neosek 直链: ${playUrl}`],
+    subtitle,
     subtitles: subtitles.length > 0 ? subtitles : undefined,
     fonts: fonts.length > 0 ? fonts : undefined,
   }

@@ -39,6 +39,7 @@ export const neosekAdapter: SourceAdapter = {
       mediaUrl: res.playUrl,
       publicHeaders: res.headers,
       format: 'hls',
+      subtitle: res.subtitle,
     }
   },
 }

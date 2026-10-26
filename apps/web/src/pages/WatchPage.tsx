@@ -381,6 +381,7 @@ export function WatchPage() {
           totalEpisodes={item?.totalEpisodes || item?.eps || 12}
           officialOpedData={w.bgmOpedData}
           expectedDurationSeconds={w.expectedDurationSeconds}
+          subtitle={w.subtitle}
           subtitles={w.subtitles}
           fonts={w.fonts}
           widescreen={widescreen}

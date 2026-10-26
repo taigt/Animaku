@@ -253,7 +253,7 @@ export function useSourceAggregator({
   }, [searchResults, titleRefs, defaultKeyword])
 
   const processQueue = useCallback(async () => {
-    if (!mountedRef.current || (!isOpen && !autoProbeOnFallback)) return
+    if (!mountedRef.current) return
 
     while (activeJobsRef.current < CONCURRENCY_LIMIT && queueRef.current.length > 0) {
       const pluginName = queueRef.current.shift()
@@ -405,11 +405,12 @@ export function useSourceAggregator({
         }
       })()
     }
-  }, [isOpen, autoProbeOnFallback, plugins, bangumiId, item, defaultKeyword, titleRefs])
+  }, [plugins, bangumiId, item, defaultKeyword, titleRefs])
 
-  // Trigger streaming probe when panel is opened or during background fallback probe
+  // Trigger streaming probe during background fallback probe
+  // Note: panel open (isOpen) auto-probing is retired; top 5 sources are now searched concurrently on session start
   useEffect(() => {
-    const shouldProbe = isOpen || autoProbeOnFallback
+    const shouldProbe = autoProbeOnFallback
     if (!shouldProbe || !plugins.length || !Number.isFinite(bangumiId) || bangumiId <= 0) {
       return
     }
@@ -458,7 +459,7 @@ export function useSourceAggregator({
       queueRef.current = Array.from(new Set([...queueRef.current, ...toProbe]))
       void processQueue()
     }
-  }, [isOpen, autoProbeOnFallback, plugins, pluginOrder, bangumiId, activePluginName, processQueue])
+  }, [autoProbeOnFallback, plugins, pluginOrder, bangumiId, activePluginName, processQueue])
 
   // Preemption: User clicks a specific source card -> jump to front of queue
   const prioritizePlugin = useCallback(

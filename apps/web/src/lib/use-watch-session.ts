@@ -252,6 +252,7 @@ export type WatchSession = {
       autoPickFirst?: boolean
       refresh?: boolean
       manualKeyword?: boolean
+      background?: boolean
     },
   ) => Promise<void>
   searchOnePlugin: (
@@ -262,6 +263,7 @@ export type WatchSession = {
       autoPickFirst?: boolean
       refresh?: boolean
       manualKeyword?: boolean
+      background?: boolean
     },
   ) => Promise<void>
   reSearchCurrentSource: (keyword: string) => Promise<void>
@@ -956,6 +958,8 @@ export function useWatchSession(bangumiId: number): WatchSession {
         refresh?: boolean
         /** Explicitly manual keyword override */
         manualKeyword?: boolean
+        /** Silent background preload: does not mutate active keyword or target plugin in UI */
+        background?: boolean
       },
     ) => {
       const gen = (pluginSearchGen.current[plugin.name] || 0) + 1
@@ -974,8 +978,10 @@ export function useWatchSession(bangumiId: number): WatchSession {
         }))
       }
       rememberSessionKeyword(plugin.name, keyword)
-      setSearchKeyword(keyword)
-      setKeywordTargetPlugin(plugin)
+      if (!opts?.background) {
+        setSearchKeyword(keyword)
+        setKeywordTargetPlugin(plugin)
+      }
 
       setSearchResults((prev) => {
         const exists = prev.some((r) => r.plugin.name === plugin.name)
@@ -1093,6 +1099,7 @@ export function useWatchSession(bangumiId: number): WatchSession {
       const isDefault =
         plugin.name.toLowerCase() === (findDefaultSourcePlugin(plugins, pluginOrder, isOld)?.name || '').toLowerCase()
       const shouldAutoPick =
+        !opts?.background &&
         Boolean(items[0]) &&
         (opts?.autoPickFirst ||
           ((isDefault || opts?.clearSelection) &&
@@ -1174,6 +1181,7 @@ export function useWatchSession(bangumiId: number): WatchSession {
         autoPickFirst?: boolean
         refresh?: boolean
         manualKeyword?: boolean
+        background?: boolean
       },
     ) => {
       const isCustomKw = Boolean(keyword?.trim() || opts?.manualKeyword)
@@ -1275,6 +1283,13 @@ export function useWatchSession(bangumiId: number): WatchSession {
     )
     if (!preferred) return
 
+    // 默认选取前 5 个优先级最高的源并发搜索（不足 5 个则全量选取）。
+    // preferred 稳居首位，其余可用源顺次补齐，天然无重复源。
+    const topPlugins = [
+      preferred,
+      ...plugins.filter((p) => p.name.toLowerCase() !== preferred.name.toLowerCase()),
+    ].slice(0, 5)
+
     // Check persistent binding first!
     const binding = useSourceBindingStore
       .getState()
@@ -1283,6 +1298,10 @@ export function useWatchSession(bangumiId: number): WatchSession {
     if (binding?.sourceUrl) {
       defaultSearchDoneFor.current = bangumiId
       setKeywordTargetPlugin(preferred)
+      // 并发预热其余前排备选源，使换源面板或容灾降级 0ms 瞬间就绪
+      for (const p of topPlugins.slice(1)) {
+        void openPluginSearch(p, undefined, { autoPickFirst: false, background: true })
+      }
       void pickSource(preferred, {
         name: binding.title || preferred.name,
         src: binding.sourceUrl,
@@ -1317,7 +1336,16 @@ export function useWatchSession(bangumiId: number): WatchSession {
     defaultSearchDoneFor.current = bangumiId
     setKeywordTargetPlugin(preferred)
     setSearchKeyword(kw)
-    void openPluginSearch(preferred, kw, { autoPickFirst: true })
+
+    // 并发搜索前 5 个源：默认源主导自动选集开播，其余源后台静默预热
+    topPlugins.forEach((p, idx) => {
+      const isDefault = idx === 0
+      const searchKw = isDefault ? kw : undefined
+      void openPluginSearch(p, searchKw, {
+        autoPickFirst: isDefault,
+        background: !isDefault,
+      })
+    })
   }, [
     bangumiId,
     qPlugin,

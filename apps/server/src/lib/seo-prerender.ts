@@ -79,6 +79,7 @@ export function matchRouteName(pathname: string): RouteName | null {
   if (clean === '/collect' || clean.startsWith('/collect/')) return 'collect'
   if (clean === '/history' || clean.startsWith('/history/')) return 'history'
   if (clean === '/settings' || clean.startsWith('/settings/')) return 'settings'
+  if (clean === '/admin' || clean.startsWith('/admin/')) return 'settings'
   return null
 }
 

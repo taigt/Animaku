@@ -35,6 +35,7 @@ function normalizeRoutePath(path: string): RouteKey | null {
   if (clean === '/collect' || clean.startsWith('/collect/')) return 'collect'
   if (clean === '/history' || clean.startsWith('/history/')) return 'history'
   if (clean === '/settings' || clean.startsWith('/settings/')) return 'settings'
+  if (clean === '/admin' || clean.startsWith('/admin/')) return 'settings'
   if (clean === '/search' || clean.startsWith('/search/')) return 'search'
   if (clean.startsWith('/subject/')) return 'subject'
   if (clean.startsWith('/play/')) return 'play'

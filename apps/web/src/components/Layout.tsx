@@ -26,7 +26,6 @@ const primaryLinks = [
 /** Desktop strip + mobile overflow menu. */
 const moreLinks = [
   { to: '/timeline', label: '时间表' },
-  { to: '/settings', label: '设置' },
 ]
 
 function HistoryIconButton() {

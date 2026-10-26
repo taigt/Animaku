@@ -80,6 +80,14 @@ export default function App() {
           }
         />
         <Route
+          path="admin"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <SettingsPage />
+            </Suspense>
+          }
+        />
+        <Route
           path="subject/:id"
           element={
             <Suspense fallback={<PageFallback />}>

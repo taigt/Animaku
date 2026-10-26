@@ -14,6 +14,7 @@ import {
 } from '@animaku/shared'
 import type { AspectRatioMode, PlayerControlsProps } from './types'
 import { PlayerSeekRange, PlayerTimeDisplay } from './PlaybackProgressUi'
+import { SourcePreferenceMenu } from './SourcePreferenceMenu'
 import {
   IconBack,
   IconCheck,
@@ -183,7 +184,7 @@ export function MobileControls(props: PlayerControlsProps) {
   const canGoNext = hasNext ?? Boolean(onNext)
 
   const [settingsSubmenu, setSettingsSubmenu] = useState<
-    'root' | 'speed' | 'sr' | 'aspectRatio' | 'shortcuts'
+    'root' | 'speed' | 'sr' | 'aspectRatio' | 'shortcuts' | 'source'
   >('root')
 
   // Heatmap path calculation
@@ -341,13 +342,14 @@ export function MobileControls(props: PlayerControlsProps) {
       setSettingsSubmenu('root')
       return
     }
+    const panelWidth = settingsSubmenu === 'source' ? 264 : 172
     const update = () => {
-      setSettingsPos(placeInBar(barRef.current, settingsBtnRef.current, 172))
+      setSettingsPos(placeInBar(barRef.current, settingsBtnRef.current, panelWidth))
     }
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
-  }, [settingsMenuOpen, showBar, pinBar])
+  }, [settingsMenuOpen, settingsSubmenu, showBar, pinBar])
 
   const stop = (e: SyntheticEvent) => e.stopPropagation()
 
@@ -724,7 +726,9 @@ export function MobileControls(props: PlayerControlsProps) {
         {/* Mobile Settings Popover */}
         {settingsMenuOpen && (
           <div
-            className="kz-settings-popover kz-settings-popover--mobile kz-mobile-bar-menu"
+            className={`kz-settings-popover kz-settings-popover--mobile kz-mobile-bar-menu ${
+              settingsSubmenu === 'source' ? 'kz-settings-popover--source' : ''
+            }`}
             data-player-chrome
             style={
               settingsPos
@@ -741,6 +745,17 @@ export function MobileControls(props: PlayerControlsProps) {
           >
             {settingsSubmenu === 'root' && (
               <div>
+                <button
+                  type="button"
+                  className="kz-settings-item"
+                  onClick={() => setSettingsSubmenu('source')}
+                >
+                  <span>📺 视频源偏好</span>
+                  <span className="kz-settings-item-val">
+                    <IconChevronRight />
+                  </span>
+                </button>
+
                 <button
                   type="button"
                   className="kz-settings-item"
@@ -934,6 +949,14 @@ export function MobileControls(props: PlayerControlsProps) {
                   )
                 })}
               </div>
+            )}
+
+            {settingsSubmenu === 'source' && (
+              <SourcePreferenceMenu
+                onBack={() => setSettingsSubmenu('root')}
+                onFlashHint={props.onFlashHint}
+                isMobile
+              />
             )}
           </div>
         )}

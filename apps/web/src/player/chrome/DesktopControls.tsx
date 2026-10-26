@@ -6,6 +6,7 @@ import {
 } from '@animaku/shared'
 import type { AspectRatioMode, PlayerControlsProps } from './types'
 import { PlayerSeekRange, PlayerTimeDisplay } from './PlaybackProgressUi'
+import { SourcePreferenceMenu } from './SourcePreferenceMenu'
 import {
   IconCheck,
   IconChevronLeft,
@@ -151,7 +152,7 @@ export function DesktopControls(props: PlayerControlsProps) {
   const canGoNext = hasNext ?? Boolean(onNext)
 
   const [settingsSubmenu, setSettingsSubmenu] = useState<
-    'root' | 'speed' | 'sr' | 'aspectRatio' | 'shortcuts'
+    'root' | 'speed' | 'sr' | 'aspectRatio' | 'shortcuts' | 'source'
   >('root')
 
   const [hoverRatio, setHoverRatio] = useState<number | null>(null)
@@ -571,9 +572,24 @@ export function DesktopControls(props: PlayerControlsProps) {
               <IconSettings />
             </button>
             {settingsMenuOpen && (
-              <div className="kz-settings-popover">
+              <div
+                className={`kz-settings-popover ${
+                  settingsSubmenu === 'source' ? 'kz-settings-popover--source' : ''
+                }`}
+              >
                 {settingsSubmenu === 'root' && (
                   <div>
+                    <button
+                      type="button"
+                      className="kz-settings-item"
+                      onClick={() => setSettingsSubmenu('source')}
+                    >
+                      <span>📺 视频源偏好</span>
+                      <span className="kz-settings-item-val">
+                        <IconChevronRight />
+                      </span>
+                    </button>
+
                     <button
                       type="button"
                       className="kz-settings-item"
@@ -836,6 +852,13 @@ export function DesktopControls(props: PlayerControlsProps) {
                       </div>
                     </div>
                   </div>
+                )}
+
+                {settingsSubmenu === 'source' && (
+                  <SourcePreferenceMenu
+                    onBack={() => setSettingsSubmenu('root')}
+                    onFlashHint={props.onFlashHint}
+                  />
                 )}
               </div>
             )}

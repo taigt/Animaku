@@ -14,12 +14,14 @@ import {
   IconPip,
   IconSparkles,
   IconSpeed,
+  IconSource,
   IconStats,
   IconVolume,
   IconWebFs,
   IconWidescreen,
 } from './icons'
 import { AUDIO_BOOST_OPTIONS } from '../hooks'
+import { SourcePreferenceMenu } from './SourcePreferenceMenu'
 
 export interface PlayerContextMenuProps {
   x: number
@@ -126,7 +128,7 @@ export function PlayerContextMenu({
 }: PlayerContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [activeSubmenu, setActiveSubmenu] = useState<
-    'aspectRatio' | 'speed' | 'audioBoost' | 'sr' | 'fullscreen' | null
+    'aspectRatio' | 'speed' | 'audioBoost' | 'sr' | 'fullscreen' | 'source' | null
   >(null)
 
   // Open submenu to the right when context menu is near left border, otherwise to left
@@ -426,6 +428,27 @@ export function PlayerContextMenu({
           )}
         </div>
 
+        {/* Source Preferences Submenu */}
+        <div
+          className="relative"
+          onMouseEnter={() => setActiveSubmenu('source')}
+          onMouseLeave={() => setActiveSubmenu(null)}
+        >
+          <MenuItem
+            icon={<IconSource />}
+            label="视频源偏好"
+            hasSubmenu
+          />
+          {activeSubmenu === 'source' && (
+            <SubmenuContainer
+              side={submenuSide}
+              className="w-[17.5rem] max-w-[calc(100vw-2rem)] p-1.5"
+            >
+              <SourcePreferenceMenu onFlashHint={onFlashHint} />
+            </SubmenuContainer>
+          )}
+        </div>
+
         {/* Widescreen Toggle */}
         {onToggleWidescreen && (
           <MenuItem
@@ -572,16 +595,18 @@ function MenuItem({
 
 function SubmenuContainer({
   side = 'left',
+  className = '',
   children,
 }: {
   side?: 'left' | 'right'
+  className?: string
   children: ReactNode
 }) {
   const sideClass = side === 'right' ? 'left-full ml-1.5' : 'right-full mr-1.5'
 
   return (
     <div
-      className={`kz-submenu-popover absolute top-0 ${sideClass} min-w-[8.5rem] rounded-xl border border-[rgba(255,255,255,0.18)] bg-[rgba(15,23,42,0.96)] p-1 text-xs text-white shadow-2xl backdrop-blur-2xl`}
+      className={`kz-submenu-popover absolute top-0 ${sideClass} min-w-[8.5rem] rounded-xl border border-[rgba(255,255,255,0.18)] bg-[rgba(15,23,42,0.96)] p-1 text-xs text-white shadow-2xl backdrop-blur-2xl ${className}`}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex flex-col gap-0.5">{children}</div>

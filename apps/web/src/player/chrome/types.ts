@@ -69,6 +69,7 @@ export interface PlayerControlsProps {
   onTogglePlayerFs: () => void
   onToggleWebFs: () => void
   onToggleWidescreen?: () => void
+  onFlashHint?: (msg: string, ms?: number) => void
   formatTime: (sec: number) => string
   speedOptions: readonly number[]
   srLabels: Record<SuperResolutionMode, string>

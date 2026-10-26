@@ -1153,6 +1153,7 @@ export function VideoPlayer({
       void togglePlayerFs()
     },
     onToggleWebFs: toggleWebFs,
+    onFlashHint: flashSkipHint,
     formatTime,
     speedOptions: PLAYER_SPEEDS,
     srLabels: SUPER_RESOLUTION_LABELS,
